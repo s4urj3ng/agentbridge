@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}AgentBridge{% endblock %}</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--fg:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5bd3;--ok:#1f7a3d;--warn:#a46200;--bad:#b3261e;--code:#f0efea}
+@media (prefers-color-scheme: dark){:root{--bg:#141413;--panel:#1d1d1b;--fg:#ecebe6;--muted:#9c9b94;--line:#33322e;--accent:#7ea0ff;--ok:#5cc27e;--warn:#e0a24a;--bad:#ff8a80;--code:#262522}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;gap:18px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header b{font-size:15px}header nav{display:flex;gap:4px;flex-wrap:wrap}header nav a{padding:5px 10px;border-radius:6px;color:var(--fg);text-decoration:none}
+header nav a.on{background:var(--code)}header form{margin-left:auto}
+main{max-width:1200px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 14px}h2{font-size:15px;margin:18px 0 8px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto}
+.kpi{font-size:24px;font-weight:600}.muted{color:var(--muted)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px}
+pre{background:var(--code);padding:10px;border-radius:6px;overflow:auto;max-height:420px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+a{color:var(--accent)}button,input,textarea,select{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button.danger{color:var(--bad)}
+input,textarea,select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+textarea{width:100%;min-height:70px}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--code)}
+.st-COMPLETED,.st-APPROVED,.ok{color:var(--ok)}.st-BLOCKED,.st-FAILED,.bad{color:var(--bad)}.st-RUNNING,.st-VALIDATING,.st-DISPATCHED,.warn{color:var(--warn)}
+.inline{display:inline}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+svg.graph{max-width:100%;height:auto}svg .edge{fill:none;stroke:var(--muted);stroke-width:1.5}
+svg rect.node{fill:var(--panel);stroke:var(--line);stroke-width:1.5}svg rect.st-COMPLETED{stroke:var(--ok)}svg rect.st-BLOCKED,svg rect.st-FAILED{stroke:var(--bad)}
+svg rect.st-RUNNING,svg rect.st-VALIDATING,svg rect.st-REVIEW_PENDING{stroke:var(--warn)}svg text{fill:var(--fg);font-size:12px}svg text.ns{fill:var(--muted);font-size:11px}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<header>
+  <b>AgentBridge</b>
+  <nav>
+    {% for href, label, key in [("/", "Overview", "overview"), ("/projects", "Projects", "projects"), ("/agents", "Agents", "agents"), ("/approvals", "Approvals", "approvals"), ("/settings", "Settings", "settings")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task')) else '' }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% if csrf %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Log out</button></form>{% endif %}
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>

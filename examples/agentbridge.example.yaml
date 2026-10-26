@@ -1,0 +1,86 @@
+# AgentBridge configuration (no secrets here: secrets live in agentbridge.env).
+bind_host: 127.0.0.1
+port: 8787
+poll_interval_s: 2.0
+
+limits:
+  max_task_depth: 2
+  max_tasks_per_milestone: 20
+  max_revisions: 3
+  max_validation_retries: 2
+  max_concurrent_agents: 2          # N100: keep total concurrent agent CLIs low
+  default_task_timeout_s: 1800
+  tech_lead_timeout_s: 600
+  max_event_attempts: 3
+  max_quota_requeues: 3
+  max_tl_invocations_per_milestone: 60
+  max_execution_failures: 3
+
+protected_branches: [main, master, "release/*", production, stable]
+validation_executables: [python, python3, pytest, make, npm, node, cargo, go, ruff, mypy, sh, bash, git, "true", "false"]
+
+github:
+  enabled: false                    # set true after `gh auth login` as the agentbridge user
+  gh_executable: gh
+
+agents:
+  # --- Tech Lead: Claude Team (Standard seat). Separate CLAUDE_CONFIG_DIR = separate login.
+  - id: claude-team-lead
+    provider: claude
+    roles: [tech_lead]
+    config_dir: /var/lib/agentbridge/identities/claude-team-lead
+    model: opus
+    max_concurrency: 1
+    daily_invocation_limit: 80
+    weekly_invocation_limit: 400
+
+  # --- Coding worker: Claude Personal, independent config dir/login.
+  - id: claude-personal-worker
+    provider: claude
+    roles: [worker]
+    config_dir: /var/lib/agentbridge/identities/claude-personal-worker
+    model: sonnet
+    permission_mode: acceptEdits
+    max_concurrency: 1
+    daily_invocation_limit: 40
+
+  # --- Antigravity (agy): verified headless CLI; single host identity.
+  - id: antigravity-worker
+    provider: antigravity
+    roles: [worker, reviewer]
+    model: gemini-3.8-flash-medium
+    max_concurrency: 1
+    daily_invocation_limit: 40
+    reserved_review_invocations: 5
+
+  # --- Codex: quota-constrained secondary worker / independent reviewer. Unverified until installed.
+  - id: codex-reviewer
+    provider: codex
+    roles: [reviewer]
+    codex_home: /var/lib/agentbridge/identities/codex
+    enabled: false
+    max_concurrency: 1
+    daily_invocation_limit: 6
+    reserved_review_invocations: 6
+
+  # --- Optional official Gemini CLI (separately authenticated). Unverified until installed.
+  - id: gemini-cli-worker
+    provider: gemini
+    roles: [worker]
+    enabled: false
+
+  # --- Mindlogic: OpenAI-compatible API. Disabled; never a Tech Lead fallback.
+  - id: mindlogic-reviewer
+    provider: mindlogic
+    roles: [reviewer]
+    enabled: false
+    base_url: https://REPLACE-WITH-MINDLOGIC-ENDPOINT/v1
+    model: REPLACE
+    api_key_env: MINDLOGIC_API_KEY
+    daily_invocation_limit: 20
+
+  # --- Mock identities for the demo / smoke tests (no quota).
+  - {id: mock-lead, provider: mock, roles: [tech_lead]}
+  - {id: mock-worker, provider: mock, roles: [worker], max_concurrency: 2}
+  - {id: mock-worker-b, provider: mock, roles: [worker]}
+  - {id: mock-reviewer, provider: mock, roles: [reviewer], daily_invocation_limit: 50, reserved_review_invocations: 5}

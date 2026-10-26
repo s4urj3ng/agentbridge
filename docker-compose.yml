@@ -1,0 +1,28 @@
+# Control plane (API + dashboard) in Docker. The engine that executes agent
+# CLIs runs on the HOST (systemd unit deployment/systemd/agentbridge-engine.service)
+# because subscription CLIs keep their login state in the host user's home.
+#
+# Both share the SQLite database through the bind-mounted data directory, so
+# the container must run with the host agentbridge user's UID/GID (see .env).
+services:
+  agentbridge-api:
+    build: .
+    image: agentbridge:0.1.0
+    restart: unless-stopped
+    user: "${AB_UID:-10001}:${AB_GID:-10001}"
+    env_file: .env
+    environment:
+      AGENTBRIDGE_DATA_DIR: /var/lib/agentbridge
+      AGENTBRIDGE_CONFIG: /etc/agentbridge/agentbridge.yaml
+    volumes:
+      - ${AB_DATA_DIR:-/var/lib/agentbridge}:/var/lib/agentbridge
+      - ${AB_CONFIG_DIR:-/etc/agentbridge}:/etc/agentbridge:ro
+      # Project repositories must be visible at the same absolute paths as on the host
+      - ${AB_REPOS_DIR:-/srv/agentbridge/repos}:${AB_REPOS_DIR:-/srv/agentbridge/repos}:ro
+    # Localhost only. Remote access: Tailscale (`tailscale serve`), never a public port.
+    ports:
+      - "127.0.0.1:8787:8787"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]

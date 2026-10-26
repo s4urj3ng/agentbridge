@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Agents</h1>
+<p class="muted">Capabilities come from <code>agentbridge agents detect</code> on the host. Credentials are never displayed; only login state and method.</p>
+{% for a in agents %}
+<div class="card" style="margin-bottom:12px">
+<div class="row"><b>{{ a.id }}</b><span class="pill">{{ a.provider }}</span><span class="pill">{{ a.roles|join(', ') }}</span>
+{% if not a.enabled %}<span class="muted">disabled</span>{% elif a.paused %}<span class="warn">paused</span>{% else %}<span class="ok">enabled</span>{% endif %}</div>
+<div class="grid" style="margin-top:8px">
+<div><div class="muted">Detection</div>{% if a.capability %}{{ 'available' if a.capability.available else 'unavailable' }}{% if a.capability.version %} · {{ a.capability.version }}{% endif %}<br>headless: {{ a.capability.headless }} · structured: {{ a.capability.structured_output }}<br>verified on host: {{ a.capability.verified }} · identity isolation: {{ a.capability.isolated_identity }}{% else %}<span class="muted">not detected yet</span>{% endif %}</div>
+<div><div class="muted">Authentication</div>{{ a.auth.state }}{% if a.auth.method %} ({{ a.auth.method }}){% endif %}</div>
+<div><div class="muted">Usage (measured)</div>24h: {{ a.usage.last_24h }} · 7d: {{ a.usage.last_7d }} · reviews 24h: {{ a.usage.reviews_24h }}<br>total {{ a.usage.total }} calls, {{ a.usage.duration_s }}s, limit errors {{ a.usage.limit_errors }}<br>tokens (when reported): {{ a.usage.input_tokens or '—' }}/{{ a.usage.output_tokens or '—' }}</div>
+<div><div class="muted">Budgets</div>daily {{ a.daily_invocation_limit or '∞' }} · weekly {{ a.weekly_invocation_limit or '∞' }}<br>reserved for review: {{ a.reserved_review_invocations }}<br>cooldown: {{ a.cooldown_until or 'none' }} {{ a.cooldown_reason or '' }}<br>circuit: {{ a.circuit_open_until or 'closed' }}</div>
+</div>
+{% if a.capability and a.capability.notes %}<p class="muted">{{ a.capability.notes|join(' · ') }}</p>{% endif %}
+<div class="row">
+{% for act in (['disable'] if a.enabled else ['enable']) + (['resume'] if a.paused or a.cooldown_until else ['pause']) %}
+<form class="inline" method="post" action="/agents/{{ a.id }}/{{ act }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ act|capitalize }}</button></form>{% endfor %}
+<form class="inline row" method="post" action="/agents/{{ a.id }}/concurrency"><input type="hidden" name="csrf" value="{{ csrf }}"><input name="value" type="number" min="0" max="8" value="{{ a.max_concurrency }}" style="width:64px"><button>Set concurrency</button></form>
+</div></div>
+{% endfor %}
+{% endblock %}

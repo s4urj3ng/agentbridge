@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Settings</h1>
+<p class="muted">Read-only view. Settings are changed in <code>agentbridge.yaml</code>, environment variables and project manifests on the host, then the services are restarted. This keeps policy out of reach of the web UI and of agents.</p>
+<div class="grid">
+<div class="card"><div class="muted">GitHub integration</div>{{ 'enabled' if s.github.enabled else 'disabled' }} · <span class="{{ 'ok' if gh_ok else 'muted' }}">{{ gh_msg }}</span><br>webhook secret: {{ 'configured' if webhook_configured else 'not configured' }}</div>
+<div class="card"><div class="muted">Workspace paths</div>data: <code>{{ s.data_dir }}</code><br>worktrees: <code>{{ s.workspaces_dir }}</code><br>artifacts: <code>{{ s.artifacts_dir }}</code></div>
+<div class="card"><div class="muted">Bind</div>{{ s.bind_host }}:{{ s.port }}</div>
+</div>
+<h2>Safety policies</h2>
+<div class="card"><b>Protected branches</b> <code>{{ s.protected_branches|join(', ') }}</code><br>
+<b>Validation executables allowlist</b> <code>{{ s.validation_executables|join(', ') }}</code><br>
+<b>Limits</b> <code>{{ s.limits.__dict__|tojson }}</code></div>
+<h2>CLI executables</h2>
+<div class="card scroll"><table><tr><th>Identity</th><th>Provider</th><th>Executable / endpoint</th></tr>
+{% for a in s.agents %}<tr><td>{{ a.id }}</td><td>{{ a.provider }}</td><td><code>{{ a.executable or a.base_url or '(default)' }}</code></td></tr>{% endfor %}</table></div>
+<h2>Projects: validation commands and policy</h2>
+{% for p in projects %}<div class="card" style="margin-bottom:10px"><b>{{ p.slug }}</b>
+<table>{% for name, argv in p.manifest.validation.commands.items() %}<tr><td>{{ name }}</td><td><code>{{ argv|join(' ') }}</code></td></tr>{% endfor %}</table>
+<p class="muted">forbidden paths: {{ p.manifest.policy.forbidden_paths|join(', ') }} · hardware: {{ p.manifest.policy.hardware_policy }} {{ p.manifest.policy.hardware_no_go|join(', ') }}</p></div>{% endfor %}
+{% endblock %}

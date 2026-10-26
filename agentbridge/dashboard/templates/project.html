@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ p.name }} <span class="pill">{{ 'paused' if p.paused else 'active' }}</span></h1>
+<div class="grid">
+  <div class="card"><div class="muted">Repository</div><code>{{ p.repo_path }}</code><div class="muted">{{ p.remote_url or 'no remote' }} · base {{ p.base_branch }}</div></div>
+  <div class="card"><div class="muted">Tech Lead</div>{{ manifest.project.tech_lead }}<div class="muted">workers: {{ ([manifest.project.default_worker] + manifest.project.workers)|join(', ') }}</div><div class="muted">reviewers: {{ manifest.project.reviewers|join(', ') or 'none' }} ({{ manifest.project.review_policy }})</div></div>
+  <div class="card"><div class="muted">Policy</div>hardware: {{ manifest.policy.hardware_policy }}<div class="muted">auto start: {{ manifest.policy.auto_start }} · draft PR: {{ manifest.policy.draft_pr }}</div></div>
+</div>
+<div class="row" style="margin-top:12px">
+<form method="post" action="/projects/{{ p.slug }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ 'Resume' if p.paused else 'Pause' }} project</button></form>
+</div>
+<h2>Submit goal</h2>
+<form class="card" method="post" action="/projects/{{ p.slug }}/goal"><input type="hidden" name="csrf" value="{{ csrf }}">
+<textarea name="goal" placeholder="Engineering goal for the Tech Lead" required></textarea>
+<div class="row" style="margin-top:8px"><input name="milestone" placeholder="Milestone key (optional)"><button class="primary">Submit</button></div></form>
+{% for m in milestones %}
+<h2>Milestone {{ m.key }} <span class="pill">{{ m.status }}</span></h2>
+<div class="card">
+<p>{{ m.goal }}</p>
+<p class="muted">integration branch: <code>{{ m.integration_branch or '—' }}</code>{% if m.pr_url %} · <a href="{{ m.pr_url }}">draft PR</a>{% endif %} · tech lead invocations: {{ m.tl_invocations }}</p>
+{% if m.graph %}<div class="scroll">{{ m.graph|safe }}</div>{% endif %}
+<table><tr><th>Task</th><th>State</th><th>Assignee</th><th>Revisions</th><th>Retries</th></tr>
+{% for t in m.tasks %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a> {{ t.title }}</td><td class="st-{{ t.state }}">{{ t.state }}</td><td>{{ t.assignee }}</td><td>{{ t.revision_count }}</td><td>{{ t.validation_retries }}</td></tr>{% endfor %}
+</table></div>
+{% endfor %}
+<h2>Project context</h2>
+<div class="card scroll"><table>{% for c in context %}<tr><td class="muted">{{ c.kind }}</td><td>{{ c.content }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

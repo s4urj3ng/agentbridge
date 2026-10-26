@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Projects</h1>
+<div class="card scroll"><table><tr><th>Project</th><th>Repository</th><th>Base</th><th>Milestones</th><th>Open tasks</th><th>State</th></tr>
+{% for p in projects %}<tr><td><a href="/projects/{{ p.slug }}">{{ p.name }}</a><div class="muted">{{ p.slug }}</div></td><td><code>{{ p.repo_path }}</code><div class="muted">{{ p.remote_url or 'no remote' }}</div></td><td>{{ p.base_branch }}</td><td>{{ p.nm }}</td><td>{{ p.open }}</td><td>{{ 'paused' if p.paused else 'active' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No projects. Register one with <code>agentbridge project add manifest.yaml</code>.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

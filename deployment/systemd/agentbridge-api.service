@@ -1,0 +1,24 @@
+# Alternative to Docker for the control plane: run the API on the host.
+[Unit]
+Description=AgentBridge API and dashboard (127.0.0.1:8787)
+After=network-online.target
+
+[Service]
+Type=simple
+User=agentbridge
+Group=agentbridge
+EnvironmentFile=/etc/agentbridge/agentbridge.env
+Environment=AGENTBRIDGE_CONFIG=/etc/agentbridge/agentbridge.yaml
+Environment=AGENTBRIDGE_DATA_DIR=/var/lib/agentbridge
+WorkingDirectory=/var/lib/agentbridge
+ExecStart=/opt/agentbridge/.venv/bin/agentbridge serve --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agentbridge
+
+[Install]
+WantedBy=multi-user.target

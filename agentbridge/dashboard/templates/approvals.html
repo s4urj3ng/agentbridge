@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Approvals</h1>
+{% for a in approvals %}
+<div class="card" style="margin-bottom:10px">
+<div class="row"><b>#{{ a.id }} {{ a.action }}</b><span class="pill">{{ a.status }}</span><span class="muted">{{ a.slug }} · requested by {{ a.requested_by }} · {{ a.created_at }}</span>
+{% if a.task_id %}<a href="/tasks/{{ a.task_id }}">task #{{ a.task_id }}</a>{% endif %}</div>
+<p>{{ a.reason }}</p>
+{% if a.evidence %}<pre>{{ a.evidence|tojson(indent=1) }}</pre>{% endif %}
+{% if a.status == 'PENDING' %}
+<form class="row" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input name="note" placeholder="Note (optional)">
+<button class="primary" formaction="/approvals/{{ a.id }}/approve">Approve</button><button class="danger" formaction="/approvals/{{ a.id }}/reject">Reject</button></form>
+{% else %}<p class="muted">{{ a.status|lower }} by {{ a.resolved_by }} at {{ a.resolved_at }}{% if a.resolution_note %}: {{ a.resolution_note }}{% endif %}</p>{% endif %}
+</div>
+{% else %}<p class="muted">No approval requests.</p>{% endfor %}
+<h2>Audit trail</h2>
+<div class="card scroll"><table>{% for e in trail %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td><code>{{ e.detail_json }}</code></td></tr>{% endfor %}</table></div>
+{% endblock %}

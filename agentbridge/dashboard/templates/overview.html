@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Overview</h1>
+<div class="grid">
+  <div class="card"><div class="muted">Engine</div><div class="kpi {{ 'ok' if health.engine_running else 'bad' }}">{{ 'running' if health.engine_running else 'stopped' }}</div></div>
+  <div class="card"><div class="muted">Agents enabled</div><div class="kpi">{{ agents|selectattr('enabled')|list|length }}/{{ agents|length }}</div></div>
+  <div class="card"><div class="muted">Projects</div><div class="kpi">{{ projects|length }}</div></div>
+  <div class="card"><div class="muted">Queue</div><div class="kpi">{{ queue }}</div></div>
+  <div class="card"><div class="muted">Running</div><div class="kpi">{{ running|length }}</div></div>
+  <div class="card"><div class="muted">Blocked</div><div class="kpi {{ 'bad' if blocked else '' }}">{{ blocked|length }}</div></div>
+  <div class="card"><div class="muted">Pending approvals</div><div class="kpi"><a href="/approvals">{{ status.pending_approvals }}</a></div></div>
+</div>
+<h2>Agents</h2>
+<div class="card scroll"><table><tr><th>Identity</th><th>Provider</th><th>State</th><th>Running</th><th>24h calls</th><th>Cooldown</th></tr>
+{% for a in agents %}<tr><td>{{ a.id }}</td><td>{{ a.provider }}</td>
+<td>{% if not a.enabled %}<span class="muted">disabled</span>{% elif a.paused %}<span class="warn">paused</span>{% else %}<span class="ok">enabled</span>{% endif %}</td>
+<td>{{ a.running }}/{{ a.max_concurrency }}</td><td>{{ a.usage.last_24h }}</td><td>{{ a.cooldown_until or '' }} {{ a.cooldown_reason or '' }}</td></tr>{% endfor %}
+</table></div>
+<h2>Running tasks</h2>
+<div class="card scroll">{% if running %}<table>{% for t in running %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a></td><td>{{ t.slug }}</td><td class="st-{{ t.state }}">{{ t.state }}</td><td>{{ t.assignee }}</td></tr>{% endfor %}</table>{% else %}<span class="muted">Nothing running.</span>{% endif %}</div>
+<h2>Blocked tasks</h2>
+<div class="card scroll">{% if blocked %}<table>{% for t in blocked %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a></td><td>{{ t.slug }}</td><td>{{ t.blocked_reason }}</td></tr>{% endfor %}</table>{% else %}<span class="muted">None.</span>{% endif %}</div>
+<h2>Recent events <span class="muted" id="live"></span></h2>
+<div class="card scroll"><table id="events">
+{% for e in events %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">#{{ e.task_id }}</a>{% endif %}</td><td><code>{{ e.detail_json[:180] }}</code></td></tr>{% endfor %}
+</table></div>
+<script>
+try{const es=new EventSource('/api/stream');const tb=document.getElementById('events');
+es.onopen=()=>document.getElementById('live').textContent='· live';
+es.onmessage=m=>{const e=JSON.parse(m.data);const tr=document.createElement('tr');
+for(const v of [e.created_at,e.actor,e.action,e.task_id?('#'+e.task_id):'',(e.detail_json||'').slice(0,180)]){const td=document.createElement('td');td.textContent=v;tr.appendChild(td)}
+tb.prepend(tr);while(tb.rows.length>60)tb.deleteRow(-1)};}catch(e){}
+</script>
+{% endblock %}

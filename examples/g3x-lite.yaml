@@ -1,0 +1,48 @@
+# G3X Lite — Canon PowerShot G3 X GM1.10C CHDK port.
+# Registered with auto_start: false so NO milestone (including PORT-9B) starts
+# without explicit owner approval. Hardware policy: STRICT NO-GO.
+project:
+  slug: g3x-lite
+  name: G3X Lite (CHDK port, PowerShot G3 X GM1.10C)
+  repo_path: /srv/agentbridge/repos/g3x-lite      # git clone https://github.com/s4urj3ng/g3x-lite
+  remote_url: https://github.com/s4urj3ng/g3x-lite
+  base_branch: main
+  tech_lead: claude-team-lead
+  default_worker: claude-personal-worker
+  workers: [antigravity-worker]
+  reviewers: [antigravity-worker, codex-reviewer]
+  review_policy: risk
+  review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
+
+validation:
+  # The repository's own offline suite (stdlib unittest; documented in its test files as
+  # "no subprocess, ROM, binary, build or hardware access"). Verified layout on 2026-10-27.
+  commands:
+    offline_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    port9_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port9*.py", "-v"]
+  default: [offline_tests]
+  timeout_s: 900
+
+policy:
+  hardware_policy: STRICT_NO_GO      # denies flashing, camera ops, SD writes, boot manipulation, deployment, hardware trials
+  hardware_no_go: [firmware_flashing, camera_operations, sd_card_writing, boot_manipulation, firmware_deployment, hardware_trial]
+  auto_start: false
+  draft_pr: approval
+  forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.FI2", "**/*.fi2", "**/*.fir",
+                    "**/*.rom", "**/DISKBOOT.BIN", "patches/**", "vendor/**", "**/*.pem", "**/.env"]
+  protected_branches: [main, master, "release/*"]
+  max_changed_files: 40
+
+limits:
+  max_task_depth: 1
+  max_tasks_per_milestone: 12
+  max_revisions: 2
+
+charter: |
+  Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Work is strictly offline:
+  source, build tooling, static analysis within the approved scope, and host-side tests.
+  Restricted firmware analysis outside the approved scope is not allowed.
+context:
+  - "Hardware policy is STRICT NO-GO: no flashing, camera operations, SD-card writing, boot changes, deployment or hardware trials."
+  - "Candidate next milestone: PORT-9B — offline runtime integration contracts. Do not start without owner approval."
+completed_milestones: [PORT-7B, PORT-7C, PORT-8A, PORT-9A]

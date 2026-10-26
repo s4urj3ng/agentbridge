@@ -1,0 +1,30 @@
+[Unit]
+Description=AgentBridge host engine (executes agent CLIs in git worktrees)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentbridge
+Group=agentbridge
+EnvironmentFile=/etc/agentbridge/agentbridge.env
+Environment=AGENTBRIDGE_CONFIG=/etc/agentbridge/agentbridge.yaml
+Environment=AGENTBRIDGE_DATA_DIR=/var/lib/agentbridge
+# CLIs installed for the agentbridge user (e.g. ~/.local/bin/claude) must be on PATH
+Environment=PATH=/var/lib/agentbridge/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/var/lib/agentbridge
+ExecStart=/opt/agentbridge/.venv/bin/agentbridge run
+Restart=always
+RestartSec=10
+# Agent subprocesses run in their own sessions; on stop only the engine is
+# signalled so running work can be re-adopted after restart.
+KillMode=process
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agentbridge /srv/agentbridge
+
+[Install]
+WantedBy=multi-user.target

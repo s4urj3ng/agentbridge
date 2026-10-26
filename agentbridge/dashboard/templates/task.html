@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set t = b.task %}
+{% block body %}
+<h1>#{{ t.id }} {{ t.key }} · {{ t.title }} <span class="pill st-{{ t.state }}">{{ t.state }}</span></h1>
+<div class="grid">
+  <div class="card"><div class="muted">Assignee</div>{{ t.assignee }}<div class="muted">reviewer pending: {{ t.reviewer or '—' }}</div></div>
+  <div class="card"><div class="muted">Attempts / revisions / retries</div>{{ t.attempt_count }} / {{ t.revision_count }} / {{ t.validation_retries }}</div>
+  <div class="card"><div class="muted">Branch</div><code>{{ t.branch or '—' }}</code><div class="muted">head {{ (t.head_sha or '')[:12] }}</div></div>
+  <div class="card"><div class="muted">Dependencies</div>{% for d in b.deps %}<a href="/tasks/{{ d.id }}">{{ d.key }}</a> <span class="st-{{ d.state }}">{{ d.state }}</span><br>{% else %}none{% endfor %}</div>
+</div>
+{% if t.state not in ('COMPLETED','CANCELLED','FAILED') %}<form method="post" action="/tasks/{{ t.id }}/cancel" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Cancel task</button></form>{% endif %}
+{% if t.blocked_reason %}<p class="bad">Blocked: {{ t.blocked_reason }}</p>{% endif %}
+<h2>Specification</h2>
+<div class="card"><p>{{ t.description }}</p><b>Acceptance criteria</b><ul>{% for a in b.acceptance %}<li>{{ a }}</li>{% endfor %}</ul>
+{% if b.allowed_paths %}<b>Allowed paths</b> <code>{{ b.allowed_paths|join(', ') }}</code>{% endif %}
+{% if t.feedback %}<b>Latest feedback</b><pre>{{ t.feedback }}</pre>{% endif %}
+{% if t.worker_summary %}<b>Worker summary (untrusted)</b><pre>{{ t.worker_summary }}</pre>{% endif %}</div>
+<h2>Validation</h2>
+<div class="card scroll">{% for v in b.validations %}<p><b class="{{ 'ok' if v.passed else 'bad' }}">{{ 'PASSED' if v.passed else 'FAILED' }}</b> <span class="muted">{{ v.created_at }}</span></p>
+<table>{% for r in v.results %}<tr><td>{{ r.name }}</td><td class="{{ 'ok' if r.exit_code == 0 else 'bad' }}">exit {{ r.exit_code }}</td><td>{{ r.duration_s }}s</td><td><code>{{ r.argv|join(' ') }}</code></td></tr>{% endfor %}</table>
+{% if v.violations %}<p class="bad">Policy: {{ v.violations|join('; ') }}</p>{% endif %}
+<p class="muted">{% for f in v.files %}{{ f.status }} {{ f.path }} (+{{ f.added }}/-{{ f.deleted }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
+{% else %}<span class="muted">No validation runs yet.</span>{% endfor %}</div>
+<h2>Reviews</h2>
+<div class="card scroll"><table>{% for r in b.reviews %}<tr><td>{{ r.reviewer }}</td><td>{{ r.source }}</td><td class="{{ 'ok' if r.verdict=='approve' else 'bad' }}">{{ r.verdict }}</td><td><pre>{{ r.body }}</pre></td></tr>{% else %}<tr><td class="muted">None.</td></tr>{% endfor %}</table></div>
+<h2>Diff</h2><pre>{{ b.diff or 'No diff yet.' }}</pre>
+<h2>Attempts</h2>
+<div class="card scroll"><table><tr><th>#</th><th>Agent</th><th>Purpose</th><th>Status</th><th>Outcome</th><th>Exit</th><th>Duration</th><th>Tokens in/out</th><th>Detail</th></tr>
+{% for a in b.attempts %}<tr><td>{{ a.id }}</td><td>{{ a.agent_id }}</td><td>{{ a.purpose }}</td><td>{{ a.status }}</td><td>{{ a.outcome }}</td><td>{{ a.exit_code }}</td><td>{{ a.duration_s }}</td><td>{{ a.input_tokens or '—' }}/{{ a.output_tokens or '—' }}</td><td>{{ a.failure_detail or '' }}</td></tr>{% endfor %}</table></div>
+<h2>Latest prompt</h2><pre>{{ b.prompt or '—' }}</pre>
+<h2>Logs</h2><b>stdout</b><pre>{{ b.stdout or '—' }}</pre><b>stderr</b><pre>{{ b.stderr or '—' }}</pre>
+<h2>State history</h2>
+<div class="card scroll"><table>{% for x in b.transitions %}<tr><td class="muted">{{ x.created_at }}</td><td>{{ x.from_state }} → <span class="st-{{ x.to_state }}">{{ x.to_state }}</span></td><td>{{ x.actor }}</td><td>{{ x.reason }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

@@ -1,0 +1,37 @@
+project:
+  slug: demo-calc
+  name: Synthetic calc demo
+  repo_path: ../var/demo-repo   # created by `agentbridge demo` (relative to this file)
+  base_branch: main
+  tech_lead: mock-lead
+  default_worker: mock-worker
+  workers:
+  - mock-worker-b
+  reviewers:
+  - mock-reviewer
+  review_policy: risk
+validation:
+  commands:
+    unit:
+    - python3
+    - -m
+    - unittest
+    - discover
+    - -s
+    - tests
+    - -t
+    - .
+  default:
+  - unit
+  timeout_s: 120
+policy:
+  hardware_policy: none
+  auto_start: true
+  draft_pr: never
+  forbidden_paths:
+  - .github/workflows/**
+  - '**/*.pem'
+  - '**/.env'
+charter: Keep calc.py small, tested and dependency-free.
+context:
+- Tests use the stdlib unittest runner.

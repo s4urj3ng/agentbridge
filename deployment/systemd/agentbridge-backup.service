@@ -1,0 +1,9 @@
+[Unit]
+Description=AgentBridge database backup
+
+[Service]
+Type=oneshot
+User=agentbridge
+Environment=AGENTBRIDGE_CONFIG=/etc/agentbridge/agentbridge.yaml
+Environment=AGENTBRIDGE_DATA_DIR=/var/lib/agentbridge
+ExecStart=/bin/sh -c '/opt/agentbridge/.venv/bin/agentbridge backup /var/backups/agentbridge/agentbridge-$(date +%%Y%%m%%d-%%H%%M).db && find /var/backups/agentbridge -name "agentbridge-*.db" -mtime +14 -delete'
