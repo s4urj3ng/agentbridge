@@ -9,7 +9,7 @@ Owner's quota picture (2026-10-27) and the resulting setup:
 | Antigravity, Gemini 3.8 Flash | 5 h + weekly (abundant) | `antigravity-worker` | `gemini-3.8-flash-high` | **default worker** |
 | Antigravity, Gemini 4 Argon | weekly | `antigravity-argon` | `gemini-4-argon-high` | worker when Flash is not enough; fallback reviewer |
 | Antigravity, external Claude | 5 h + weekly, **small** | `antigravity-claude-reviewer` | `claude-opus-5-5-medium` | **preferred reviewer** of run results |
-| ChatGPT / Codex | 5 h + weekly | `codex-reviewer` | Codex 6.1, reasoning high | high-risk second opinion; last fallback reviewer |
+| ChatGPT / Codex | 5 h + weekly | `codex-reviewer` | `gpt-6.1-sol`, reasoning high | high-risk second opinion; last fallback reviewer |
 | Mindlogic | credits | disabled | | not used for now |
 
 ## Flow
@@ -56,5 +56,5 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
 
 All `max` values are starting points; the providers' real quotas are not machine-readable. Watch
 **Agents → Usage** (calls per 5 h / 7 d, limit errors) for a few days and set each cap a little
-below where real limit errors begin. Confirm the Codex model id (`gpt-6.1` in the example) in
+below where real limit errors begin. The Codex model id `gpt-6.1-sol` was read from `/model` in
 `codex` on the server; `agents smoke codex-reviewer` fails clearly if it is wrong.

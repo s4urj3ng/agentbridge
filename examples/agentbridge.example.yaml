@@ -85,14 +85,14 @@ agents:
     rolling_limits: [{hours: 5, max: 12}, {hours: 168, max: 70}]
 
   # --- Codex 6.1 high: scarce (5h + weekly). Independent second opinion for high-risk changes,
-  # and last fallback reviewer. Confirm the exact model id in `codex` (/model) on the server.
+  # and last fallback reviewer. Model id confirmed in `codex` /model on the N100.
   - id: codex-reviewer
     provider: codex
     roles: [reviewer]
     codex_home: /var/lib/agentbridge/.codex
-    model: gpt-6.1
+    model: gpt-6.1-sol
     reasoning_effort: high
-    profile: "SCARCE (5h + weekly), Codex 6.1 high. Independent second opinion ONLY for high-risk changes (boot path, stubs, memory maps, security-sensitive code)."
+    profile: "SCARCE (5h + weekly), Codex GPT-6.1-Sol high. Independent second opinion ONLY for high-risk changes (boot path, stubs, memory maps, security-sensitive code)."
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 4}, {hours: 168, max: 25}]
 
