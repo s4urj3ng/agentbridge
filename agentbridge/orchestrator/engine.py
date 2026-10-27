@@ -35,7 +35,7 @@ from ..workers import process
 from ..workers.git_ops import GitError, GitWorkspace, slugify
 from ..workers.validation import run_validation
 from . import events as evq
-from . import quota
+from . import overrides, quota
 from .context import build_review_prompt, build_tech_lead_prompt, build_worker_prompt
 from .decisions import (DecisionEnvelope, MalformedDecision, ReviewResult, WorkerResult, envelope_json_schema,
                         parse_envelope, review_result_schema, worker_result_schema)
@@ -105,6 +105,7 @@ class Engine:
                                       " weekly_invocation_limit, reserved_review_invocations, config_json, updated_at,"
                                       " id, enabled) VALUES (?,?,?,?,?,?,?,?,?,?)",
                                       (*vals, a["id"], int(a.get("enabled", True))))
+            overrides.apply_agent_rows(self.conn)   # owner runtime overrides win over the config file
 
     def adapter(self, agent_id: str) -> AgentAdapter:
         a = row(self.conn, "SELECT provider, config_json FROM agents WHERE id=?", agent_id)
@@ -124,13 +125,19 @@ class Engine:
             return agent_id, ""
         if not quota.is_quota_block(why):
             return None, why
-        r = row(self.conn, "SELECT config_json FROM agents WHERE id=?", agent_id)
-        for fb in (jload(r["config_json"], {}).get("fallback_to") or []) if r else []:
+        for fb in overrides.fallback_chain(self.conn, agent_id):
             if fb == agent_id or fb not in allowed or self._config_problem(fb):
                 continue
             if quota.admission(self.conn, fb, purpose)[0]:
                 return fb, f"{agent_id}: {why}"
         return None, why
+
+    def _pick_in_order(self, order: list[str], purpose: str) -> str | None:
+        """First admitted agent of an owner-ordered list (default worker / preferred reviewer first)."""
+        for a in order:
+            if not self._config_problem(a) and quota.admission(self.conn, a, purpose)[0]:
+                return a
+        return None
 
     def _config_problem(self, agent_id: str) -> str | None:
         """Static adapter-config refusal (e.g. a model outside the allowed quota pool)."""
@@ -189,8 +196,9 @@ class Engine:
                           (pid, kind, content, now_iso()))
 
     def manifest(self, project_id: int) -> Manifest:
+        """The project manifest with the owner's runtime overrides (workers/reviewers order) applied."""
         r = row(self.conn, "SELECT manifest_json FROM projects WHERE id=?", project_id)
-        return Manifest.model_validate_json(r["manifest_json"])
+        return overrides.apply_project(self.conn, Manifest.model_validate_json(r["manifest_json"]))
 
     def _protected(self, m: Manifest) -> list[str]:
         return list(dict.fromkeys(self.s.protected_branches + m.policy.protected_branches + [m.project.base_branch]))
@@ -917,14 +925,19 @@ class Engine:
             if f"task:{t['id']}" in self.jobs:
                 continue
             m = self.manifest(t["project_id"])
-            agent, why = self._pick_agent(t["assignee"], "work", self._agent_roster(m)["workers"])
+            workers = self._agent_roster(m)["workers"]
+            if t["assignee"] not in (m.project.default_worker, *m.project.workers):
+                # the owner removed this worker from the project: follow the new order instead
+                agent, why, action = self._pick_in_order(workers, "work"), "not in project workers", "task.reroute"
+            else:
+                (agent, why), action = self._pick_agent(t["assignee"], "work", workers), "task.fallback"
             if agent is None:
                 continue  # this agent (and its fallbacks) is unavailable; other agents' tasks still dispatch
             if agent != t["assignee"]:
                 with tx(self.conn):
                     self.conn.execute("UPDATE tasks SET assignee=?, updated_at=? WHERE id=?", (agent, now_iso(), t["id"]))
-                    audit(self.conn, "quota", "task.fallback", project_id=t["project_id"], task_id=t["id"],
-                          src=t["assignee"], dst=agent, reason=why)
+                    audit(self.conn, "quota" if action == "task.fallback" else "override", action,
+                          project_id=t["project_id"], task_id=t["id"], src=t["assignee"], dst=agent, reason=why)
                 t = row(self.conn, "SELECT * FROM tasks WHERE id=?", t["id"])
             problem = self._config_problem(t["assignee"])
             if problem:
@@ -961,14 +974,18 @@ class Engine:
                 continue
             m = self.manifest(t["project_id"])
             reviewers = [r for r in self._agent_roster(m)["reviewers"] if r != t["assignee"]]
-            agent, why = self._pick_agent(t["reviewer"], "review", reviewers)
+            if t["reviewer"] not in m.project.reviewers or t["reviewer"] == t["assignee"]:
+                # the owner removed this reviewer from the project: first admitted one in the new order
+                agent, why, action = self._pick_in_order(reviewers, "review"), "not in project reviewers", "review.reroute"
+            else:
+                (agent, why), action = self._pick_agent(t["reviewer"], "review", reviewers), "review.fallback"
             if agent is None:
                 continue
             if agent != t["reviewer"]:
                 with tx(self.conn):
                     self.conn.execute("UPDATE tasks SET reviewer=? WHERE id=?", (agent, t["id"]))
-                    audit(self.conn, "quota", "review.fallback", project_id=t["project_id"], task_id=t["id"],
-                          src=t["reviewer"], dst=agent, reason=why)
+                    audit(self.conn, "quota" if action == "review.fallback" else "override", action,
+                          project_id=t["project_id"], task_id=t["id"], src=t["reviewer"], dst=agent, reason=why)
                 t = row(self.conn, "SELECT * FROM tasks WHERE id=?", t["id"])
             problem = self._config_problem(t["reviewer"])
             if problem:

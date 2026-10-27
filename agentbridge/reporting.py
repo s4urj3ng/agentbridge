@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import jload, parse_ts, row, rows, utcnow
+from .orchestrator.overrides import fallback_chain
 from .orchestrator.quota import provider_block, running_count, window_count
 
 
@@ -90,7 +91,7 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                              "left_pct": None if used is None or stale else max(0, round(100 - used)),
                              "resets_at": w.get("resets_at"), "status": w.get("status"), "stale": stale})
         out.append({"id": a["id"], "provider": a["provider"], "model": cfg.get("model"), "state": state,
-                    "fallback_to": cfg.get("fallback_to") or [],
+                    "fallback_to": fallback_chain(conn, a["id"], cfg),
                     "provider_windows": provider, "provider_source": (pq or {}).get("source"),
                     "provider_quota_at": a["provider_quota_at"],
                     "until": until.isoformat(timespec="minutes") if until else None,

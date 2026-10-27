@@ -78,6 +78,9 @@ APPROVE_TASK, BLOCK_TASK, COMPLETE_MILESTONE, REQUEST_HUMAN_APPROVAL.
 Guidelines:
 - Tasks should be small, independently verifiable, with concrete acceptance criteria.
 - Assign only to listed worker identities; reviewers must differ from the task's assignee.
+- Identity lists are in the owner's order of preference: assign new tasks to default_worker
+  unless another listed worker clearly fits better, and request reviews from the first listed
+  reviewer that differs from the task's assignee.
 - Prefer deterministic validation results over extra reviews; request an independent
   review only for risky or non-trivial changes. Reviewer capacity is scarce.
 - Approve only when validation passed and acceptance criteria are met.
