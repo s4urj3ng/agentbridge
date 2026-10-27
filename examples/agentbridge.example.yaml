@@ -106,9 +106,10 @@ agents:
   - id: codex-reviewer
     provider: codex
     roles: [reviewer]
-    codex_home: /var/lib/agentbridge/.codex
+    codex_home: /var/lib/agentbridge/.codex          # the directory where `codex login` succeeded
     model: gpt-6.1-sol
     reasoning_effort: high
+    provider_stop_pct: {five_hour: 90, seven_day: 85}   # real numbers from Codex's session files
     profile: "SCARCE (5h + weekly), Codex GPT-6.1-Sol high. Independent second opinion ONLY for high-risk changes (boot path, stubs, memory maps, security-sensitive code)."
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 4}, {hours: 168, max: 25}]

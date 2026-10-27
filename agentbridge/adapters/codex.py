@@ -9,6 +9,14 @@ used). The invocation follows the documented non-interactive mode:
 usable, so a CLI without these flags is reported as unsupported rather than
 invoked with invented arguments.
 
+Real quota: `codex exec --json` stdout carries no rate-limit data, but Codex
+writes each session to $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl, and
+those records include `rate_limits` = {primary: {used_percent, window_minutes:
+300, resets_at}, secondary: {..., window_minutes: 10080, ...}, plan_type,
+rate_limit_reached_type} (verified on the N100, codex-cli 0.164.0). AgentBridge
+reads the newest rollout after each run and in its free probes; it never
+touches the credentials in auth.json.
+
 Identity isolation: CODEX_HOME selects the config/auth directory.
 Codex is quota-constrained: keep `reserved_review_invocations` and low daily
 limits; it is never the default reviewer (routing is explicit per manifest).
@@ -17,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from ..policies.safety import redact
@@ -30,6 +39,34 @@ REQUIRED_FLAGS = ("--json", "--sandbox", "--output-schema", "--output-last-messa
 class CodexAdapter(AgentAdapter):
     provider = "codex"
     executable_default = "codex"
+
+    @property
+    def home(self) -> Path:
+        h = self.config.get("codex_home") or os.environ.get("CODEX_HOME") or "~/.codex"
+        return Path(os.path.expanduser(h))
+
+    def latest_rate_limits(self, since: float | None = None) -> dict | None:
+        """rate_limits from the newest session rollout (optionally only one written after `since`)."""
+        sessions = self.home / "sessions"
+        if not sessions.is_dir():
+            return None
+        files = sorted(sessions.glob("*/*/*/rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for f in files[:3]:
+            if since is not None and f.stat().st_mtime < since:
+                break
+            with open(f, "rb") as fh:
+                fh.seek(max(0, f.stat().st_size - 512_000))
+                lines = fh.read().decode("utf-8", errors="replace").splitlines()
+            for line in reversed(lines):
+                if '"rate_limits"' not in line:
+                    continue
+                try:
+                    rl = _find_rate_limits(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+                if rl:
+                    return rl
+        return None
 
     def _env(self) -> dict[str, str]:
         env = self.base_env()
@@ -111,6 +148,9 @@ class CodexAdapter(AgentAdapter):
             rl = _find_rate_limits(ev)
             if rl:
                 rate_limits = rl
+        if rate_limits is None and exit_info is not None:
+            # stdout has none; the session rollout written during this run does
+            rate_limits = self.latest_rate_limits(since=time.time() - exit_info.duration_s - 60)
         pq = provider_quota(rate_limits)
         if code != 0:
             outcome, retry = classify_text(stdout[-5000:] + stderr[-5000:], code)
@@ -167,4 +207,8 @@ def provider_quota(rl: dict | None) -> dict | None:
         used = float(w["used_percent"])
         windows[name] = {"used_pct": round(used, 1), "resets_at": resets,
                          "status": "rejected" if used >= 100 else "allowed"}
-    return {"source": "codex rate_limits", "windows": windows} if windows else None
+    if not windows:
+        return None
+    if rl.get("rate_limit_reached_type"):        # provider says a limit is hit: treat the fullest window as rejected
+        max(windows.values(), key=lambda w: w["used_pct"])["status"] = "rejected"
+    return {"source": "codex rollout rate_limits", "plan": rl.get("plan_type"), "windows": windows}

@@ -1,6 +1,7 @@
-"""Free quota probes: provider commands that report real quota without a model turn.
+"""Free quota probes: real provider quota without a model turn.
 
-Currently: Antigravity `/usage` (0 tokens). One call serves every Antigravity
+Antigravity `/usage` (0 tokens); Codex's own session rollout files (last
+numbers the provider returned). One call serves every Antigravity
 identity (they share the host login); each identity gets the group governing
 its model. Safe to run often; used by the engine periodically and by the
 Telegram bot when the owner opens the quota view.
@@ -23,6 +24,11 @@ def refresh_free_quotas(settings: Settings, conn: sqlite3.Connection | None = No
     try:
         results: dict[str, dict | None] = {}
         cache: dict[str, dict | None] = {}
+        # Codex: last numbers Codex itself wrote to its session rollout (reading a file; no call)
+        for a in rows(conn, "SELECT id, config_json FROM agents WHERE enabled=1 AND provider='codex'"):
+            from .adapters.codex import provider_quota as codex_pq
+            ad = make_adapter("codex", a["id"], jload(a["config_json"], {}))
+            results[a["id"]] = codex_pq(ad.latest_rate_limits())
         for a in rows(conn, "SELECT id, config_json FROM agents WHERE enabled=1 AND provider='antigravity'"):
             ad = make_adapter("antigravity", a["id"], jload(a["config_json"], {}))
             key = ad.executable or ""

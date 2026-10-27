@@ -97,3 +97,58 @@ def test_telegram_shows_provider_numbers(settings):
     text, _ = bot.quota_text()
     assert "✅  5h" in text and "còn 88%" in text
     assert "7d đã reset" in text          # stale window is not shown as a fake number
+
+
+# rate_limits exactly as found in a real Codex rollout on the N100 (codex-cli 0.164.0)
+CODEX_RL = {"limit_id": "codex", "limit_name": None,
+            "primary": {"used_percent": 2.0, "window_minutes": 300, "resets_at": RESET_5H},
+            "secondary": {"used_percent": 11.0, "window_minutes": 10080, "resets_at": RESET_7D},
+            "credits": {"has_credits": False, "unlimited": False, "balance": "0"}, "individual_limit": None,
+            "spend_control_reached": None, "plan_type": "plus", "rate_limit_reached_type": None}
+
+
+def _codex_home(tmp_path, rl):
+    d = tmp_path / "codex" / "sessions" / "2026" / "10" / "27"
+    d.mkdir(parents=True)
+    (d / "rollout-x.jsonl").write_text("\n".join([
+        json.dumps({"type": "session_meta", "payload": {"id": "s"}}),
+        json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": None, "rate_limits": rl}}),
+        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "ok"}})]))
+    return tmp_path / "codex"
+
+
+def test_codex_quota_from_rollout(tmp_path):
+    from agentbridge.adapters.codex import CodexAdapter
+    ad = CodexAdapter("codex-reviewer", {"codex_home": str(_codex_home(tmp_path, CODEX_RL))})
+    pq = codex_quota(ad.latest_rate_limits())
+    assert pq["plan"] == "plus"
+    assert pq["windows"]["five_hour"] == {"used_pct": 2.0, "resets_at": pq["windows"]["five_hour"]["resets_at"],
+                                          "status": "allowed"}
+    assert pq["windows"]["seven_day"]["used_pct"] == 11.0
+    assert ad.latest_rate_limits(since=time.time() + 60) is None   # nothing written after `since`
+
+
+def test_codex_collect_reads_rollout_and_reached_limit(tmp_path):
+    from agentbridge.adapters.codex import CodexAdapter
+    rl = dict(CODEX_RL, rate_limit_reached_type="primary",
+              primary={"used_percent": 100.0, "window_minutes": 300, "resets_at": RESET_5H})
+    ad = CodexAdapter("codex-reviewer", {"codex_home": str(_codex_home(tmp_path, rl))})
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "stdout.log").write_text(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 5}}))
+    (run / "stderr.log").write_text("")
+    (run / "last_message.txt").write_text(json.dumps({"status": "ok", "sum": 5}))
+    res = ad.collect_result(run, ExitInfo(0, "exited", 3))
+    assert res.outcome == "success"
+    assert res.provider_quota["windows"]["five_hour"]["status"] == "rejected"
+
+
+def test_free_probe_includes_codex(settings, tmp_path):
+    from agentbridge.quota_probe import refresh_free_quotas
+    settings.agents.append({"id": "codex-reviewer", "provider": "codex", "roles": ["reviewer"],
+                            "codex_home": str(_codex_home(tmp_path, CODEX_RL))})
+    e = make_engine(settings)
+    res = refresh_free_quotas(settings)
+    assert res["codex-reviewer"]["windows"]["seven_day"]["used_pct"] == 11.0
+    stored = json.loads(q(e, "SELECT provider_quota_json FROM agents WHERE id='codex-reviewer'")[0]["provider_quota_json"])
+    assert stored["source"] == "codex rollout rate_limits"

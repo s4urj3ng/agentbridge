@@ -326,7 +326,7 @@ class Engine:
         age = probe_age_s(self.conn)
         if age is not None and age < self.s.quota_poll_s:
             return
-        if not row(self.conn, "SELECT 1 FROM agents WHERE enabled=1 AND provider='antigravity'"):
+        if not row(self.conn, "SELECT 1 FROM agents WHERE enabled=1 AND provider IN ('antigravity','codex')"):
             return
         self._spawn_job("quota-probe", asyncio.to_thread(refresh_free_quotas, self.s))
 

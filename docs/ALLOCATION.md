@@ -50,7 +50,8 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
   `quota_poll_s` (10 min), and the Telegram bot refreshes it when you open the quota view, so the
   same stop-level/fallback logic applies to the three Antigravity identities. For example, the
   Claude-in-Antigravity reviewer hands reviews to Argon or Codex once its real 5-hour bucket
-  passes 90%.
+  passes 90%. Codex's numbers come from its own session files after every run, so `codex-reviewer`
+  can use `provider_stop_pct` as well.
 - **Provider errors win:** a real usage-limit or rate-limit error puts that identity into cooldown
   (using the reset or retry-after time when the CLI reports one) and triggers the same fallback.
 - **Profiles** (`profile:` text) are shown to the Tech Lead so it picks the right pool when it

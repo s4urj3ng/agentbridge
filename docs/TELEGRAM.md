@@ -8,7 +8,8 @@ Check quota and progress, and get notified, without touching the server.
 - **Quota view:** for each enabled agent:
   - ✅ **real numbers reported by the provider:** Antigravity's `/usage` (Gemini, Claude/GPT and
     Argon groups), re-read for free when you open the view; and Claude Code's 5-hour and 7-day
-    % left from its last call (Codex's too, once its output shape is confirmed). A window whose
+    % left from its last call; Codex's 5-hour and weekly % from the session file Codex itself
+    writes after each run. A window whose
     reset time has passed is shown as "đã reset (chưa đo lại)" (reset, not measured since), not
     as a stale number. `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
   - 📐 % left of the budget **you** configured (`rolling_limits`), as an extra safety net.
