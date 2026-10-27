@@ -92,3 +92,15 @@ def test_executable_found_in_user_local_bin(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     assert ClaudeAdapter("c", {}).executable == str(exe)
+
+
+def test_env_file_loading(monkeypatch, tmp_path):
+    from agentbridge.config import load_env_file
+    f = tmp_path / "ab.env"
+    f.write_text("# c\nMINDLOGIC_API_KEY=abc123xyz\nexport FOO_TOKEN='q'\nEXISTING=new\nBAD LINE\n")
+    monkeypatch.delenv("MINDLOGIC_API_KEY", raising=False)
+    monkeypatch.delenv("FOO_TOKEN", raising=False)
+    monkeypatch.setenv("EXISTING", "old")
+    assert sorted(load_env_file(f)) == ["FOO_TOKEN", "MINDLOGIC_API_KEY"]
+    import os
+    assert os.environ["MINDLOGIC_API_KEY"] == "abc123xyz" and os.environ["EXISTING"] == "old"

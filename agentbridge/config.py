@@ -84,6 +84,31 @@ class Settings:
 
 SYSTEM_CONFIG = Path("/etc/agentbridge/agentbridge.yaml")
 SYSTEM_DATA_DIR = Path("/var/lib/agentbridge")
+SYSTEM_ENV_FILE = Path("/etc/agentbridge/agentbridge.env")
+
+
+def load_env_file(path: Path) -> list[str]:
+    """Load KEY=VALUE lines into os.environ without overriding existing values.
+
+    systemd units get this file via EnvironmentFile=; manual CLI runs (e.g.
+    `agentbridge agents smoke mindlogic-reviewer`) need the same secrets.
+    Returns the names loaded (never the values).
+    """
+    loaded: list[str] = []
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return loaded
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip().removeprefix("export ").strip(), val.strip().strip('"').strip("'")
+        if key.isidentifier() and val and key not in os.environ:
+            os.environ[key] = val
+            loaded.append(key)
+    return loaded
 
 DEFAULT_AGENTS: list[dict[str, Any]] = [
     # Mock identities: always available, consume no subscription quota.
@@ -103,6 +128,8 @@ def load_settings(config_file: str | os.PathLike | None = None,
     else:
         # ./agentbridge.yaml for development, else the system install's config
         cfg_path = next((p for p in (Path("agentbridge.yaml"), SYSTEM_CONFIG) if p.exists()), Path("agentbridge.yaml"))
+    if cfg_path.resolve() == SYSTEM_CONFIG:
+        load_env_file(Path(os.environ.get("AGENTBRIDGE_ENV_FILE", SYSTEM_ENV_FILE)))
     raw: dict[str, Any] = {}
     if cfg_path.exists():
         raw = yaml.safe_load(cfg_path.read_text()) or {}
