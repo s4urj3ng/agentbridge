@@ -80,3 +80,15 @@ def test_schemas_are_portable():
     from agentbridge.orchestrator.decisions import envelope_json_schema, review_result_schema, worker_result_schema
     for s in (envelope_json_schema(), worker_result_schema(), review_result_schema()):
         assert "discriminator" not in json.dumps(s)
+
+
+def test_executable_found_in_user_local_bin(monkeypatch, tmp_path):
+    """Under sudo/systemd PATH often lacks ~/.local/bin, where claude/agy installers put the CLI."""
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    exe = home / ".local" / "bin" / "claude"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert ClaudeAdapter("c", {}).executable == str(exe)

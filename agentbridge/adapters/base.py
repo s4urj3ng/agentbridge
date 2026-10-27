@@ -133,7 +133,11 @@ class AgentAdapter(ABC):
     @property
     def executable(self) -> str | None:
         exe = self.config.get("executable") or self.executable_default
-        return shutil.which(exe) if exe else None
+        if not exe:
+            return None
+        # ~/.local/bin is where the official installers put per-user CLIs, and it is
+        # often missing from PATH under sudo or systemd
+        return shutil.which(exe) or shutil.which(exe, path=str(Path.home() / ".local" / "bin"))
 
     @abstractmethod
     def detect(self) -> Capability: ...

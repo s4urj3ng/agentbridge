@@ -34,11 +34,13 @@ grep -q '^data_dir:' "$CONF/agentbridge.yaml" || sed -i "1i data_dir: $DATA" "$C
 # `agentbridge` on PATH for admins: always runs as the agentbridge user with the system config
 cat > /usr/local/bin/agentbridge <<WRAP
 #!/bin/sh
+# sudo resets PATH; the provider CLIs live in the agentbridge user's ~/.local/bin
+export PATH="$DATA/.local/bin:/usr/local/bin:/usr/bin:/bin"
 cd "$DATA" 2>/dev/null || cd /
 if [ "\$(id -un)" = agentbridge ]; then
   exec env AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" "$PREFIX/.venv/bin/agentbridge" "\$@"
 fi
-exec sudo -u agentbridge env AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" "$PREFIX/.venv/bin/agentbridge" "\$@"
+exec sudo -u agentbridge env PATH="\$PATH" AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" "$PREFIX/.venv/bin/agentbridge" "\$@"
 WRAP
 chmod 755 /usr/local/bin/agentbridge
 
