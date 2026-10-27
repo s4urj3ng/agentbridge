@@ -1,0 +1,11 @@
+PORT-9B — Offline runtime integration contracts for GM1.10C.
+
+Build on PORT-9A (tools/port9a_runtime_lifecycle.py, tests/test_port9a_runtime_lifecycle.py, docs/PORT9A_RUNTIME_INTEGRATION_MAP.md). For each interface I1 (task-creation interception), I2 (InitFileModules readiness gate), I3 (SpyTask startup ordering) and I4 (keyboard task lifecycle), define an explicit, testable contract: preconditions, postconditions, failure behaviour, and the exact evidence (artifact type, what it must show, how it is verified) required before the corresponding GM1.10C precondition may change from False to True.
+
+Deliverables:
+1. tools/port9b_integration_contracts.py: standard library only, no addresses, no I/O, no firmware access; the PORT-9A model must be checkable against it.
+2. tests/test_port9b_*.py: offline unittest suites, including negative controls, proving the PORT-9A model satisfies every contract and that every GM1.10C precondition stays False while its required evidence is not recorded.
+3. docs/PORT9B_INTEGRATION_CONTRACTS.md: maps unknowns U1-U7 to the evidence each contract needs; every claim labelled VERIFIED / INFERRED / UNKNOWN with citations to tracked files only.
+4. One final task that updates docs/PROJECT_STATE.md and docs/HANDOFF.md once, covering PORT-7B through PORT-9B with the exact next command.
+
+Out of scope: any change under chdk-port/, firmware/, patches/ or vendor/; ROM or dump reads; compilers or builds; implementing any hook; changing tools/port9a_runtime_lifecycle.py behaviour (extend via new modules instead).
