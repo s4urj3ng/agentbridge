@@ -45,7 +45,12 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
   every call. AgentBridge stores the report and refuses the agent, which triggers the fallback,
   when a window is `rejected`, or when it reaches `provider_stop_pct` (for example
   `{five_hour: 95, seven_day: 85}`). That way work moves elsewhere before the weekly pool is
-  drained. Antigravity reports no quota; there the owner's `rolling_limits` are the only guard.
+  drained. Antigravity's `/usage` command reports its real quota for free (no model turn), per
+  group: Gemini (Flash/Pro), Claude and GPT, and Argon. The engine refreshes it every
+  `quota_poll_s` (10 min), and the Telegram bot refreshes it when you open the quota view, so the
+  same stop-level/fallback logic applies to the three Antigravity identities. For example, the
+  Claude-in-Antigravity reviewer hands reviews to Argon or Codex once its real 5-hour bucket
+  passes 90%.
 - **Provider errors win:** a real usage-limit or rate-limit error puts that identity into cooldown
   (using the reset or retry-after time when the CLI reports one) and triggers the same fallback.
 - **Profiles** (`profile:` text) are shown to the Tech Lead so it picks the right pool when it

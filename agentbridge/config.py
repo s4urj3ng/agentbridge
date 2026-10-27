@@ -42,6 +42,7 @@ class Settings:
     bind_host: str = "127.0.0.1"
     port: int = 8787
     poll_interval_s: float = 2.0
+    quota_poll_s: float = 600.0          # free provider quota probes (Antigravity /usage); 0 = off
     limits: Limits = field(default_factory=Limits)
     agents: list[dict[str, Any]] = field(default_factory=list)
     github: dict[str, Any] = field(default_factory=dict)
@@ -141,6 +142,7 @@ def load_settings(config_file: str | os.PathLike | None = None,
     s.bind_host = os.environ.get("AGENTBRIDGE_BIND", raw.get("bind_host", s.bind_host))
     s.port = int(os.environ.get("AGENTBRIDGE_PORT", raw.get("port", s.port)))
     s.poll_interval_s = float(raw.get("poll_interval_s", s.poll_interval_s))
+    s.quota_poll_s = float(raw.get("quota_poll_s", s.quota_poll_s))
     s.agents = raw.get("agents") or list(DEFAULT_AGENTS)
     s.github = raw.get("github") or {}
     s.telegram = raw.get("telegram") or {}

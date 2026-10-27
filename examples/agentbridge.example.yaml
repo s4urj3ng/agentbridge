@@ -2,6 +2,7 @@
 bind_host: 127.0.0.1
 port: 8787
 poll_interval_s: 2.0
+quota_poll_s: 600            # free quota probes (agy /usage, 0 tokens) every 10 minutes
 
 limits:
   max_task_depth: 2
@@ -57,6 +58,7 @@ agents:
     roles: [worker]
     model: gemini-3.8-flash-high
     fallback_to: [antigravity-argon]
+    provider_stop_pct: {five_hour: 95, seven_day: 90}   # real numbers from agy /usage (Gemini group)
     profile: "DEFAULT worker (Gemini 3.8 Flash high). Cheap and abundant. Routine implementation, tests, docs, research."
     max_concurrency: 2
     rolling_limits: [{hours: 5, max: 60}]
@@ -66,22 +68,24 @@ agents:
     provider: antigravity
     roles: [worker, reviewer]
     model: gemini-4-argon-high
+    provider_stop_pct: {seven_day: 90}                  # real numbers from agy /usage (Argon group)
     profile: "Weekly quota. Use when Gemini 3.8 Flash is not enough: harder tasks, or tasks that failed on Flash. Also a fallback reviewer."
     max_concurrency: 1
     rolling_limits: [{hours: 168, max: 60}]
 
   # --- Preferred reviewer: Claude Opus 5.5 medium INSIDE Antigravity (small external-model quota).
-  # Keep its 5 h cap tight; when the 5 h window is full, reviews move to the fallbacks instead of
-  # waiting into the next window or eating the weekly allowance.
   - id: antigravity-claude-reviewer
     provider: antigravity
     roles: [reviewer]
     model: claude-opus-5-5-medium
     allow_external_models: true
     fallback_to: [antigravity-argon, codex-reviewer]
+    # Real 5h/weekly numbers from agy /usage ("Claude and GPT models" group): when the 5 h window is
+    # nearly used up, reviews move to the fallbacks instead of eating into the weekly allowance.
+    provider_stop_pct: {five_hour: 90, seven_day: 80}
     profile: "PREFERRED reviewer for run results (Claude Opus 5.5 medium via Antigravity). Small quota: request it first; AgentBridge reroutes automatically when its 5 h window is full."
     max_concurrency: 1
-    rolling_limits: [{hours: 5, max: 6}, {hours: 168, max: 40}]
+    rolling_limits: [{hours: 5, max: 20}]                # loose safety net; the real numbers above decide
 
   # --- Claude Personal (Pro), Opus 5.5 medium: scarce, hard coding tasks only.
   - id: claude-personal-worker

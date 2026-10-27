@@ -8,6 +8,13 @@ Verified on this host (agy 1.4.7, `agy --help`, one real call):
   * `--mode accept-edits|auto|plan`, `--model`, `--sandbox`, `--add-dir`.
   * `agy models` lists models (used as a cheap auth probe; no prompt is sent).
 
+  * `agy --print /usage --output-format json` runs the /usage slash command
+    without a model turn (0 tokens) and returns the real quota as
+    `command.data.groups[].buckets[]` with `window` (5h/weekly),
+    `remaining_fraction` and `reset_time`. Groups seen: "Gemini Models"
+    (Flash, Pro), "Claude and GPT models" (Claude Opus/Sonnet, GPT-OSS) and
+    "Gemini 4 Argon".
+
 Not verified: a per-identity config directory. AgentBridge therefore treats
 Antigravity as a single host identity. The prompt is passed as an argument,
 so it is capped below Linux's 128 KiB per-argument limit.
@@ -52,6 +59,13 @@ class AntigravityAdapter(AgentAdapter):
         if not ok:
             cap.available = False
             cap.notes.append(why)
+        if cap.available:
+            pq = self.quota_for(self.read_usage())
+            if pq:
+                left = ", ".join(f"{k} {100 - w['used_pct']:.0f}% left" for k, w in pq["windows"].items())
+                cap.notes.append(f"real quota via /usage ({pq['group']}): {left}")
+            else:
+                cap.notes.append("/usage quota not available for this model")
         if not cap.headless:
             cap.notes.append("no headless --print mode detected: adapter must stay disabled")
         return cap
@@ -122,3 +136,60 @@ class AntigravityAdapter(AgentAdapter):
             res.retry_after_s = retry
             res.detail = redact(json.dumps({k: d.get(k) for k in ("status", "error")})[:800])
         return res
+
+    # ------------------------------------------------------------ real quota (/usage, no model turn)
+    def read_usage(self) -> dict[str, dict] | None:
+        """Run `/usage` and return {group name: normalised provider quota}. None if unavailable."""
+        exe = self.executable
+        if not exe:
+            return None
+        r = process.run_cmd([exe, "--print", "/usage", "--output-format", "json"], cwd=Path.home(),
+                            timeout_s=90, env=self.base_env())
+        return parse_usage(r.stdout) if r.exit_code == 0 else None
+
+    def quota_for(self, groups: dict[str, dict] | None) -> dict | None:
+        """The /usage group that governs this identity's model."""
+        if not groups:
+            return None
+        return groups.get(usage_group_for(self.config.get("model") or "", list(groups)))
+
+
+def usage_group_for(model: str, group_names: list[str]) -> str | None:
+    m = model.lower()
+    def find(word: str) -> str | None:
+        return next((g for g in group_names if word in g.lower()), None)
+    if m.startswith(EXTERNAL_MODEL_PREFIXES):
+        return find("claude") or find("gpt")
+    if "argon" in m:
+        return find("argon") or find("gemini models")
+    if m.startswith("gemini"):
+        return next((g for g in group_names if "gemini" in g.lower() and "argon" not in g.lower()), None)
+    return None
+
+
+def parse_usage(stdout: str) -> dict[str, dict] | None:
+    d = None
+    for candidate in (stdout.strip(), (stdout.strip().splitlines() or [""])[-1]):
+        try:
+            d = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    groups = (((d.get("command") or {}).get("data") or {}).get("groups")) if isinstance(d, dict) else None
+    if not isinstance(groups, list):
+        return None
+    out = {}
+    for g in groups:
+        windows = {}
+        for b in g.get("buckets") or []:
+            frac = b.get("remaining_fraction")
+            if not isinstance(frac, (int, float)):
+                continue
+            name = {"5h": "five_hour", "weekly": "seven_day"}.get(b.get("window"), str(b.get("window")))
+            windows[name] = {"used_pct": round((1 - float(frac)) * 100, 1),
+                             "resets_at": b.get("reset_time"),
+                             "status": "rejected" if frac <= 0 else "allowed"}
+        if windows:
+            out[g.get("name", "?")] = {"source": "antigravity /usage", "group": g.get("name"), "windows": windows}
+    return out or None
+

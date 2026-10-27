@@ -18,6 +18,7 @@ def settings(tmp_path: Path) -> Settings:
     s = Settings(data_dir=tmp_path / "data")
     s.agents = [dict(a) for a in DEFAULT_AGENTS]
     s.poll_interval_s = 0.05
+    s.quota_poll_s = 0          # never call real provider CLIs from tests
     s.ensure_dirs()
     return s
 

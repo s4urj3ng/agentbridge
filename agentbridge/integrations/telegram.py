@@ -97,7 +97,18 @@ class TelegramBot:
         return datetime.fromisoformat(iso).astimezone(self.tz).strftime("%H:%M %d/%m")
 
     # ------------------------------------------------------------ views
+    def refresh_quota(self, max_age_s: float = 60) -> None:
+        """Free probes (Antigravity /usage, 0 tokens) when the last one is older than max_age_s."""
+        from ..quota_probe import probe_age_s, refresh_free_quotas
+        age = probe_age_s(self.conn)
+        if age is None or age > max_age_s:
+            try:
+                refresh_free_quotas(self.s, self.conn)
+            except Exception as e:
+                log.warning("quota probe failed: %s", redact(str(e)))
+
     def quota_text(self) -> tuple[str, list]:
+        self.refresh_quota()
         lines = ["<b>📊 Quota</b>", "<i>✅ = số thật do nhà cung cấp báo ở lần gọi gần nhất. "
                                    "📐 = ngân sách bạn đặt cho AgentBridge (nhà cung cấp không công bố quota).</i>", ""]
         buttons = []

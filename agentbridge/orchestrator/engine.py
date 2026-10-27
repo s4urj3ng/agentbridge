@@ -312,8 +312,21 @@ class Engine:
         busy |= self._dispatch()
         busy |= self._dispatch_reviews()
         busy |= self._resume_stuck()
+        self._maybe_probe_quota()
         await asyncio.sleep(0)
         return busy
+
+    def _maybe_probe_quota(self) -> None:
+        """Refresh free provider quota reports (no model turn) every `quota_poll_s`."""
+        if self.s.quota_poll_s <= 0 or "quota-probe" in self.jobs:
+            return
+        from ..quota_probe import probe_age_s, refresh_free_quotas
+        age = probe_age_s(self.conn)
+        if age is not None and age < self.s.quota_poll_s:
+            return
+        if not row(self.conn, "SELECT 1 FROM agents WHERE enabled=1 AND provider='antigravity'"):
+            return
+        self._spawn_job("quota-probe", asyncio.to_thread(refresh_free_quotas, self.s))
 
     def _spawn_job(self, key: str, coro) -> None:
         async def wrapped():

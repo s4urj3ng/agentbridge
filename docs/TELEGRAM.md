@@ -6,12 +6,12 @@ Check quota and progress, and get notified, without touching the server.
 - **Buttons:** 📊 Quota · 📁 Dự án (projects) · 📝 Chờ duyệt (approvals) · 🔄 Làm mới (refresh).
   Commands: `/status`, `/quota`, `/approvals`.
 - **Quota view:** for each enabled agent:
-  - ✅ **real numbers reported by the provider** at its last call: Claude Code's 5-hour and 7-day
-    % left with reset times (and Codex's, once its output shape is confirmed). A window whose
+  - ✅ **real numbers reported by the provider:** Antigravity's `/usage` (Gemini, Claude/GPT and
+    Argon groups), re-read for free when you open the view; and Claude Code's 5-hour and 7-day
+    % left from its last call (Codex's too, once its output shape is confirmed). A window whose
     reset time has passed is shown as "đã reset (chưa đo lại)" (reset, not measured since), not
     as a stale number. `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
-  - 📐 % left of the budget **you** configured (`rolling_limits`). This is the only guard for
-    Antigravity, which reports no quota.
+  - 📐 % left of the budget **you** configured (`rolling_limits`), as an extra safety net.
   - state: 🔴 cooldown (until the provider's reset time), 🟠 circuit open, ⏸ paused.
   Tap an agent for details.
 - **Notifications** (configurable via `telegram.notify`): milestone completed, task completed,
