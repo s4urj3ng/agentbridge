@@ -18,14 +18,19 @@ The script creates the `agentbridge` system user (home `/var/lib/agentbridge`), 
 (generated admin token, mode 640), installs and enables `agentbridge-engine.service` and the
 daily backup timer, and runs `agentbridge init`. It does not log in to any provider.
 
+It also installs `/usr/local/bin/agentbridge`, a wrapper that always runs the CLI as the
+`agentbridge` user with `/etc/agentbridge/agentbridge.yaml` and `/var/lib/agentbridge`, so every
+`agentbridge …` command below works from any sudo-capable account. Re-running `install.sh`
+after `git pull` upgrades in place and keeps config, tokens and the database.
+
 ## 2. Provider CLIs and logins (as `agentbridge`)
 
 Install the CLIs for the `agentbridge` user (for example `~/.local/bin/claude`, `agy`), then
 follow [AGENT_AUTH.md](AGENT_AUTH.md). Check:
 
 ```bash
-sudo -iu agentbridge /opt/agentbridge/.venv/bin/agentbridge agents detect
-sudo -iu agentbridge /opt/agentbridge/.venv/bin/agentbridge agents smoke claude-team-lead
+agentbridge agents detect
+agentbridge agents smoke claude-team-lead
 ```
 
 ## 3. Control plane
@@ -62,7 +67,7 @@ webhooks, expose only the webhook path, or poll PR state instead.
 
 ```bash
 sudo -u agentbridge git clone https://github.com/s4urj3ng/g3x-lite /srv/agentbridge/repos/g3x-lite
-sudo -u agentbridge /opt/agentbridge/.venv/bin/agentbridge project add /opt/agentbridge/examples/g3x-lite.yaml
+agentbridge project add /opt/agentbridge/examples/g3x-lite.yaml
 ```
 
 The G3X Lite manifest sets `auto_start: false` and `STRICT_NO_GO`. A submitted goal creates an
@@ -98,11 +103,11 @@ and branches live in the repositories. Provider credentials are never in the bac
 
 ```bash
 # daily via agentbridge-backup.timer → /var/backups/agentbridge (14 days kept); manual:
-sudo -u agentbridge /opt/agentbridge/.venv/bin/agentbridge backup /var/backups/agentbridge/manual.db
+agentbridge backup /var/backups/agentbridge/manual.db
 
 # restore
 sudo systemctl stop agentbridge-engine agentbridge-api   # or: docker compose stop
-sudo -u agentbridge /opt/agentbridge/.venv/bin/agentbridge restore /var/backups/agentbridge/manual.db --force
+agentbridge restore /var/backups/agentbridge/manual.db --force
 sudo systemctl start agentbridge-engine agentbridge-api
 ```
 

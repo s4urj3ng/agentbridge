@@ -29,6 +29,18 @@ if [[ ! -f "$CONF/agentbridge.env" ]]; then
   echo "Generated admin token in $CONF/agentbridge.env (read it with: sudo cat $CONF/agentbridge.env)"
 fi
 [[ -f "$CONF/agentbridge.yaml" ]] || install -o root -g agentbridge -m 640 "$SRC/examples/agentbridge.example.yaml" "$CONF/agentbridge.yaml"
+grep -q '^data_dir:' "$CONF/agentbridge.yaml" || sed -i "1i data_dir: $DATA" "$CONF/agentbridge.yaml"
+
+# `agentbridge` on PATH for admins: always runs as the agentbridge user with the system config
+cat > /usr/local/bin/agentbridge <<WRAP
+#!/bin/sh
+cd "$DATA" 2>/dev/null || cd /
+if [ "\$(id -un)" = agentbridge ]; then
+  exec env AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" "$PREFIX/.venv/bin/agentbridge" "\$@"
+fi
+exec sudo -u agentbridge env AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" "$PREFIX/.venv/bin/agentbridge" "\$@"
+WRAP
+chmod 755 /usr/local/bin/agentbridge
 
 install -m 644 "$SRC"/deployment/systemd/*.service "$SRC"/deployment/systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
@@ -40,4 +52,4 @@ echo "Engine installed. Control plane: either"
 echo "  sudo systemctl enable --now agentbridge-api      (host)   or"
 echo "  cd $PREFIX && docker compose up -d                (Docker; set AB_UID/AB_GID in .env)"
 echo "Next: log in each agent identity as the agentbridge user (docs/AGENT_AUTH.md), then"
-echo "  sudo -u agentbridge $PREFIX/.venv/bin/agentbridge agents detect"
+echo "  agentbridge agents detect        (wrapper in /usr/local/bin; runs as agentbridge)"

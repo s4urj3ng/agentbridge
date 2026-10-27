@@ -82,6 +82,9 @@ class Settings:
             p.mkdir(parents=True, exist_ok=True)
 
 
+SYSTEM_CONFIG = Path("/etc/agentbridge/agentbridge.yaml")
+SYSTEM_DATA_DIR = Path("/var/lib/agentbridge")
+
 DEFAULT_AGENTS: list[dict[str, Any]] = [
     # Mock identities: always available, consume no subscription quota.
     {"id": "mock-lead", "provider": "mock", "roles": ["tech_lead"], "max_concurrency": 1},
@@ -94,11 +97,17 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
 
 def load_settings(config_file: str | os.PathLike | None = None,
                   data_dir: str | os.PathLike | None = None) -> Settings:
-    cfg_path = Path(config_file or os.environ.get("AGENTBRIDGE_CONFIG", "agentbridge.yaml"))
+    explicit = config_file or os.environ.get("AGENTBRIDGE_CONFIG")
+    if explicit:
+        cfg_path = Path(explicit)
+    else:
+        # ./agentbridge.yaml for development, else the system install's config
+        cfg_path = next((p for p in (Path("agentbridge.yaml"), SYSTEM_CONFIG) if p.exists()), Path("agentbridge.yaml"))
     raw: dict[str, Any] = {}
     if cfg_path.exists():
         raw = yaml.safe_load(cfg_path.read_text()) or {}
-    ddir = Path(data_dir or os.environ.get("AGENTBRIDGE_DATA_DIR") or raw.get("data_dir") or "./var").resolve()
+    default_dir = SYSTEM_DATA_DIR if cfg_path.resolve() == SYSTEM_CONFIG else Path("./var")
+    ddir = Path(data_dir or os.environ.get("AGENTBRIDGE_DATA_DIR") or raw.get("data_dir") or default_dir).resolve()
     limits = Limits(**(raw.get("limits") or {}))
     s = Settings(data_dir=ddir, config_file=cfg_path if cfg_path.exists() else None, limits=limits)
     s.bind_host = os.environ.get("AGENTBRIDGE_BIND", raw.get("bind_host", s.bind_host))
