@@ -172,7 +172,8 @@ def build_worker_prompt(task: sqlite3.Row, *, project: sqlite3.Row, manifest: di
     allowed = jload(task["allowed_paths_json"], [])
     denied = manifest.get("denied_categories") or []
     parts = [
-        f"You are a software engineering worker for project {project['name']}.",
+        f"You are a software engineering worker for project {project['name']}. "
+        "This task is dispatched by AgentBridge (follow the repository's 'AgentBridge mode' rules if it has them).",
         f"Your working directory is an isolated git worktree: {worktree}. Only modify files inside it.",
         "Rules: do not push, do not change git remotes or branches, do not rewrite history, do not modify "
         ".git, CI workflows or secrets. Commit your work or leave it uncommitted; AgentBridge commits "
@@ -199,7 +200,8 @@ def build_review_prompt(task: sqlite3.Row, *, diff: str, validation_summary: str
     acc = jload(task["acceptance_json"], [])
     ex = diff_excerpt(diff)
     return "\n\n".join([
-        "You are an independent code reviewer. You may read files but must not modify anything.",
+        "You are an independent code reviewer. This review is dispatched by AgentBridge. "
+        "You may read files but must not modify anything.",
         f"## Task {task['key']}: {task['title']}\n{task['description']}",
         "## Acceptance criteria\n- " + "\n- ".join(acc),
         f"## Deterministic validation: {validation_summary}",
