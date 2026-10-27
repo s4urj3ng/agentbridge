@@ -8,14 +8,14 @@ otherwise. Re-check on the deployment host with `agentbridge agents detect` and
 |---|---|---|---|---|---|---|
 | Installed | yes (dev + N100) | yes (dev + N100) | N100 only | **no** | n/a (HTTP) | yes |
 | Headless mode | `-p` ✅ verified | `--print` ✅ verified | `exec` ✅ verified (N100) | `-p` (documented, unverified) | HTTP | ✅ |
-| Structured output | `--json-schema` → `structured_output` ✅ | `--json-schema` → `structured_output` ✅ | `--output-schema` + `--output-last-message` ✅ | prompt + parse (unverified) | prompt + parse, validated (fake-gateway tested) | ✅ |
+| Structured output | `--json-schema` → `structured_output` ✅ | `--json-schema` → `structured_output` ✅ | `--output-schema` + `--output-last-message` ✅ | prompt + parse (unverified) | prompt + parse, validated ✅ (N100) | ✅ |
 | Token usage reported | ✅ `usage` (+ cache tokens, `total_cost_usd`) | ✅ `usage.input_tokens/output_tokens` | ✅ NDJSON `usage` | no | `usage` if API returns it | none |
 | Separate identities | ✅ `CLAUDE_CONFIG_DIR` (fresh dir = logged out) | ❌ none found; single host identity | `CODEX_HOME` (unverified) | ❌ not assumed | per API key | n/a |
 | Non-interactive auth check | ✅ `claude auth status --json` | ✅ `agy models` (no prompt sent) | ✅ `codex login status` | ❌ | `GET /credits/` + `/models/` (real balance) | n/a |
 | Tool restriction | ✅ `--tools ""`, `--allowedTools`, `--permission-prompts none` | `--mode plan / accept-edits`, `--sandbox` | `--sandbox read-only / workspace-write` | `--approval-mode` | no tools | n/a |
 | File editing in worktree | yes (acceptEdits + allowlist) | ✅ verified (fixed `calc.py`) | expected | expected | ❌ text only | ✅ |
 | Roles in AgentBridge | tech_lead, worker, reviewer | worker, reviewer | worker, reviewer | worker | reviewer | all |
-| End-to-end loop verified | ✅ as Tech Lead (haiku) | ✅ as worker | smoke only (N100) | ❌ | ❌ | ✅ (all tests) |
+| End-to-end loop verified | ✅ as Tech Lead (haiku) | ✅ as worker | smoke only (N100) | ❌ | smoke only (N100) | ✅ (all tests) |
 
 ## Real verification log (2026-10-27)
 
@@ -43,6 +43,10 @@ otherwise. Re-check on the deployment host with `agentbridge agents detect` and
 - `agents smoke`: claude-team-lead ✅ (6.4 s), claude-personal-worker ✅ (4.3 s),
   antigravity-worker ✅ (23 s), codex-reviewer ✅ (5.2 s, 14,148 / 19 tokens).
 - Mock demo completed end to end on the N100.
+- Mindlogic Gateway (`https://factchat-cloud.mindlogic.ai/v1/gateway`): `detect` auth ok via
+  `/credits/`; `smoke mindlogic-gpt-reviewer` (gpt-5.6-sol, chat completions) ✅ 2.3 s, 85 / 12
+  tokens, real balance reported (5,011.9 credits); `smoke claude-mindlogic-worker` (Claude Code
+  through the Anthropic-native gateway endpoint, `ANTHROPIC_AUTH_TOKEN`) ✅ 2.6 s.
 
 Previously not verified: the two specific accounts (Claude Team Standard / Claude Personal). Only the
 mechanism was verified; the logins must be done on the server.

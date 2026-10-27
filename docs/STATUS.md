@@ -18,7 +18,8 @@
 
 - Antigravity adapter (**verified** with real calls), Codex adapter (**verified** by smoke test on
   the N100, codex-cli 0.164.0), Gemini CLI adapter (implemented with flag detection;
-  **unverified**: CLI not installed), Mindlogic HTTP adapter (implemented, disabled, **unverified**).
+  **unverified**: CLI not installed), Mindlogic Gateway adapter (**verified** by smoke tests on the N100: OpenAI-compatible reviewer and
+  Claude Code via the Anthropic-native endpoint; credit floor uses the real `/credits/` balance).
 - Dependency scheduling, independent review routing (reviewer ≠ author, detached read-only
   worktree), review policy (`never` / `risk` paths / `always`).
 - Quota controls: per-agent concurrency, global concurrency, daily/weekly invocation ceilings,
