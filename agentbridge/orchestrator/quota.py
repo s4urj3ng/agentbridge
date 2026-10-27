@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 
-from ..db import audit, jload, now_iso, parse_ts, row, tx, utcnow
+from ..db import audit, jdump, jload, now_iso, parse_ts, row, tx, utcnow
 
 QUOTA_OUTCOMES = {"rate_limited", "usage_limited"}
 DEFAULT_COOLDOWN = {"rate_limited": 120, "usage_limited": 1800}
@@ -64,6 +64,10 @@ def admission(conn: sqlite3.Connection, agent_id: str, purpose: str) -> tuple[bo
             return False, f"daily invocation budget reached ({d}/{a['daily_invocation_limit']}, purpose={purpose})"
     if a["weekly_invocation_limit"] is not None and w >= a["weekly_invocation_limit"]:
         return False, f"weekly invocation budget reached ({w}/{a['weekly_invocation_limit']})"
+    # Quota the provider itself reported on the last call (Claude rate_limit_event, ...).
+    blocked = provider_block(a, now)
+    if blocked:
+        return False, blocked
     # Provider-shaped rolling windows, e.g. [{hours: 5, max: 25}, {hours: 168, max: 150}].
     # These are owner-chosen ceilings to spread usage, not a claim about the provider's real quota.
     for lim in jload(a["config_json"], {}).get("rolling_limits") or []:
@@ -78,7 +82,39 @@ def admission(conn: sqlite3.Connection, agent_id: str, purpose: str) -> tuple[bo
 
 def is_quota_block(why: str) -> bool:
     """Refusals caused by quota/health (worth falling back), as opposed to paused/disabled/busy."""
-    return why.startswith(("cooldown", "circuit", "daily invocation", "weekly invocation")) or "window budget" in why
+    return why.startswith(("cooldown", "circuit", "daily invocation", "weekly invocation", "provider window")) \
+        or "window budget" in why
+
+
+def provider_block(a: sqlite3.Row, now) -> str | None:
+    """Refuse when the provider's own report says a window is exhausted or above the owner's stop level.
+
+    `provider_stop_pct` (agent config) is a number or a per-window map, e.g.
+    {five_hour: 90, seven_day: 85}: stop sending work before the provider refuses, so a fallback
+    agent takes over instead of draining the weekly pool. Windows whose reset time has passed
+    are ignored (the report is stale).
+    """
+    pq = jload(a["provider_quota_json"], None)
+    if not pq:
+        return None
+    stop = jload(a["config_json"], {}).get("provider_stop_pct")
+    for name, w in (pq.get("windows") or {}).items():
+        resets = parse_ts(w.get("resets_at"))
+        if resets and resets <= now:
+            continue
+        until = f" until {w['resets_at']}" if w.get("resets_at") else ""
+        if w.get("status") == "rejected":
+            return f"provider window {name} exhausted{until}"
+        limit = stop.get(name) if isinstance(stop, dict) else stop
+        if limit is not None and w.get("used_pct") is not None and w["used_pct"] >= float(limit):
+            return f"provider window {name} at {w['used_pct']:g}% (stop at {limit}%){until}"
+    return None
+
+
+def record_provider_quota(conn: sqlite3.Connection, agent_id: str, pq: dict | None) -> None:
+    if pq:
+        conn.execute("UPDATE agents SET provider_quota_json=?, provider_quota_at=? WHERE id=?",
+                     (jdump(pq), now_iso(), agent_id))
 
 
 def window_count(conn: sqlite3.Connection, agent_id: str, hours: float) -> int:

@@ -126,9 +126,14 @@ async def _smoke(e: Engine, agent_id: str) -> dict:
               "required": ["status", "sum"], "additionalProperties": False}
     res = await ad.execute(ExecRequest("tech_lead", "Do not use tools. Compute 2+3 and reply with status ok and the sum.",
                                        cwd, run_dir, 180, schema))
+    from .db import tx
+    from .orchestrator import quota
+    with tx(e.conn):
+        quota.record_provider_quota(e.conn, agent_id, res.provider_quota)
     return {"agent": agent_id, "ok": res.outcome == "success" and (res.structured or {}).get("sum") == 5,
             "outcome": res.outcome, "structured": res.structured, "input_tokens": res.input_tokens,
-            "output_tokens": res.output_tokens, "duration_s": res.duration_s, "detail": res.detail[:300]}
+            "output_tokens": res.output_tokens, "duration_s": res.duration_s, "detail": res.detail[:300],
+            "provider_quota": res.provider_quota}
 
 
 def cmd_approvals(args):

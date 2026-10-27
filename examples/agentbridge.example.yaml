@@ -47,6 +47,9 @@ agents:
     effort: medium
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 30}, {hours: 168, max: 200}]
+    # Claude Code reports the real 5h/7d utilisation on every call (rate_limit_event);
+    # stop above these levels so the weekly pool is never drained by routine events.
+    provider_stop_pct: {five_hour: 97, seven_day: 90}
 
   # --- Default worker: Antigravity Gemini 3.8 Flash (high). Falls back to Argon 4 when it is not enough.
   - id: antigravity-worker
@@ -89,6 +92,7 @@ agents:
     effort: medium
     permission_mode: acceptEdits
     fallback_to: [antigravity-argon]
+    provider_stop_pct: {five_hour: 95, seven_day: 85}   # real Anthropic numbers → fallback before the limit
     profile: "SCARCE (5h + weekly), Claude Opus 5.5 medium. Only complex or risky code, multi-file changes, subtle bugs, or tasks that failed on the Gemini workers."
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 12}, {hours: 168, max: 70}]

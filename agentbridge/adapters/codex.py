@@ -96,19 +96,26 @@ class CodexAdapter(AgentAdapter):
         dur = exit_info.duration_s if exit_info else None
         code = exit_info.exit_code if exit_info else None
         in_tok = out_tok = None
+        rate_limits = None
         for line in stdout.splitlines():  # NDJSON events; pick up token usage when reported
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            u = ev.get("usage") if isinstance(ev, dict) else None
+            if not isinstance(ev, dict):
+                continue
+            u = ev.get("usage")
             if isinstance(u, dict):
                 in_tok = u.get("input_tokens", in_tok)
                 out_tok = u.get("output_tokens", out_tok)
+            rl = _find_rate_limits(ev)
+            if rl:
+                rate_limits = rl
+        pq = provider_quota(rate_limits)
         if code != 0:
             outcome, retry = classify_text(stdout[-5000:] + stderr[-5000:], code)
             return AgentResult(outcome if outcome != "success" else "failed", retry_after_s=retry,
-                               detail=redact(stderr[-800:]), duration_s=dur)
+                               detail=redact(stderr[-800:]), duration_s=dur, provider_quota=pq)
         last = run_dir / "last_message.txt"
         text = last.read_text() if last.exists() else ""
         structured = None
@@ -118,4 +125,46 @@ class CodexAdapter(AgentAdapter):
         except json.JSONDecodeError:
             pass
         return AgentResult("success" if structured is not None else "malformed", structured=structured, text=text,
-                           input_tokens=in_tok, output_tokens=out_tok, duration_s=dur)
+                           input_tokens=in_tok, output_tokens=out_tok, duration_s=dur, provider_quota=pq)
+
+
+def _find_rate_limits(obj, depth: int = 0) -> dict | None:
+    """Locate a `rate_limits` object with primary/secondary windows anywhere in an event.
+
+    UNVERIFIED shape (to be confirmed against codex-cli output on the server):
+    {"primary": {"used_percent": 12.0, "window_minutes": 300, "resets_in_seconds": 3600}, "secondary": {...}}
+    """
+    if depth > 5 or not isinstance(obj, dict):
+        return None
+    rl = obj.get("rate_limits")
+    if isinstance(rl, dict) and any(isinstance(rl.get(k), dict) for k in ("primary", "secondary")):
+        return rl
+    for v in obj.values():
+        if isinstance(v, dict):
+            found = _find_rate_limits(v, depth + 1)
+            if found:
+                return found
+    return None
+
+
+def provider_quota(rl: dict | None) -> dict | None:
+    if not rl:
+        return None
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    windows = {}
+    for key in ("primary", "secondary"):
+        w = rl.get(key)
+        if not isinstance(w, dict) or not isinstance(w.get("used_percent"), (int, float)):
+            continue
+        minutes = w.get("window_minutes")
+        name = {300: "five_hour", 10080: "seven_day"}.get(minutes, f"{key}_{minutes}m")
+        resets = None
+        if isinstance(w.get("resets_in_seconds"), (int, float)):
+            resets = (now + timedelta(seconds=w["resets_in_seconds"])).isoformat(timespec="seconds")
+        elif isinstance(w.get("resets_at"), (int, float)):
+            resets = datetime.fromtimestamp(w["resets_at"], timezone.utc).isoformat(timespec="seconds")
+        used = float(w["used_percent"])
+        windows[name] = {"used_pct": round(used, 1), "resets_at": resets,
+                         "status": "rejected" if used >= 100 else "allowed"}
+    return {"source": "codex rate_limits", "windows": windows} if windows else None

@@ -1,9 +1,13 @@
 """Claude Code CLI adapter.
 
 Verified on this host (Claude Code 2.1.310):
-  * `claude -p` reads the prompt from stdin; `--output-format json` returns a
-    single result object with `is_error`, `subtype`, `result`, `usage`,
-    `total_cost_usd` and — with `--json-schema` — `structured_output`.
+  * `claude -p` reads the prompt from stdin. With `--output-format stream-json
+    --verbose` it emits NDJSON events ending in a `result` event that has
+    `is_error`, `subtype`, `result`, `usage`, `total_cost_usd` and, with
+    `--json-schema`, `structured_output` (same shape as `--output-format json`).
+  * The stream also carries `rate_limit_event` with the subscription's real
+    window state: `rate_limit_info.unifiedWindows.{five_hour,seven_day}` →
+    `utilization` (0..1), `resetsAt` (epoch s), `status` (allowed/rejected).
   * `--tools ""` disables all tools (used for the Tech Lead).
   * `--permission-prompts none` denies anything that would prompt.
   * `claude auth status --json` reports `loggedIn` / `authMethod`.
@@ -109,7 +113,7 @@ class ClaudeAdapter(AgentAdapter):
 
     def prepare(self, req: ExecRequest) -> Invocation:
         exe = self.executable or self.executable_default
-        argv = [exe, "-p", "--output-format", "json", "--no-session-persistence",
+        argv = [exe, "-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence",
                 "--permission-prompts", "none", "--strict-mcp-config"]
         model = req.model or self.config.get("model")
         if model:
@@ -135,26 +139,78 @@ class ClaudeAdapter(AgentAdapter):
         if early:
             return early
         stdout, stderr = self.read_outputs(run_dir)
-        d = self.json_from_stdout(stdout)
+        events = _events(stdout)
+        d = next((e for e in reversed(events) if e.get("type") == "result"), None)
+        if d is None and not events:
+            d = self.json_from_stdout(stdout)   # plain --output-format json (older configs)
+        pq = provider_quota(events)
         dur = exit_info.duration_s if exit_info else None
         if d is None:
             outcome, retry = classify_text(stdout[-5000:] + stderr[-5000:], exit_info.exit_code if exit_info else None)
             if outcome == "success":
                 outcome = "malformed"
-            return AgentResult(outcome, detail=redact((stderr or stdout)[-800:]), retry_after_s=retry, duration_s=dur)
+            return AgentResult(outcome, detail=redact((stderr or stdout)[-800:]), retry_after_s=_reset_in(pq) or retry,
+                               duration_s=dur, provider_quota=pq)
         usage = d.get("usage") or {}
         res = AgentResult(
             "success", structured=d.get("structured_output") if isinstance(d.get("structured_output"), dict) else None,
-            text=str(d.get("result") or ""), duration_s=dur,
+            text=str(d.get("result") or ""), duration_s=dur, provider_quota=pq,
             input_tokens=_sum(usage, "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"),
             output_tokens=usage.get("output_tokens"), cost_usd_reported=d.get("total_cost_usd"))
         if d.get("is_error") or d.get("subtype") not in (None, "success"):
             blob = json.dumps({k: d.get(k) for k in ("result", "subtype", "api_error_status", "terminal_reason")})
             outcome, retry = classify_text(blob + stderr[-3000:], 1)
             res.outcome = outcome if outcome != "success" else "failed"
-            res.retry_after_s = retry
+            # the provider's own reset time beats any parsed or default backoff
+            res.retry_after_s = (_reset_in(pq) if res.outcome in ("usage_limited", "rate_limited") else None) or retry
             res.detail = redact(blob[:800])
         return res
+
+
+def _events(stdout: str) -> list[dict]:
+    out = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                v = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(v, dict) and "type" in v:
+                out.append(v)
+    return out
+
+
+def provider_quota(events: list[dict]) -> dict | None:
+    """Normalise the last rate_limit_event into {"source", "windows": {name: {used_pct, resets_at, status}}}."""
+    info = next((e.get("rate_limit_info") for e in reversed(events) if e.get("type") == "rate_limit_event"), None)
+    if not isinstance(info, dict):
+        return None
+    windows = {}
+    for name, w in (info.get("unifiedWindows") or {}).items():
+        if isinstance(w, dict) and isinstance(w.get("utilization"), (int, float)):
+            windows[name] = {"used_pct": round(float(w["utilization"]) * 100, 1),
+                             "resets_at": _iso(w.get("resetsAt")), "status": w.get("status")}
+    if not windows and info.get("rateLimitType"):
+        windows[info["rateLimitType"]] = {"used_pct": None, "resets_at": _iso(info.get("resetsAt")),
+                                          "status": info.get("status")}
+    return {"source": "claude rate_limit_event", "status": info.get("status"), "windows": windows} if windows else None
+
+
+def _iso(epoch) -> str | None:
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat(timespec="seconds") if epoch else None
+
+
+def _reset_in(pq: dict | None) -> int | None:
+    """Seconds until the latest reset among windows the provider marked as rejected."""
+    if not pq:
+        return None
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    resets = [datetime.fromisoformat(w["resets_at"]) for w in pq["windows"].values()
+              if w.get("status") == "rejected" and w.get("resets_at")]
+    return max(0, int((max(resets) - now).total_seconds())) if resets else None
 
 
 def _sum(d: dict, *keys: str) -> int | None:

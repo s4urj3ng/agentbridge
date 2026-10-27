@@ -41,6 +41,11 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
   on the Antigravity-Claude reviewer. When its 5-hour cap is reached, reviews move on
   immediately instead of waiting for the next window or draining the weekly allowance.
   `reserve_for_review` can hold part of a window back for reviews.
+- **Real provider numbers where available:** Claude Code reports its 5-hour and 7-day utilisation on
+  every call. AgentBridge stores the report and refuses the agent, which triggers the fallback,
+  when a window is `rejected`, or when it reaches `provider_stop_pct` (for example
+  `{five_hour: 95, seven_day: 85}`). That way work moves elsewhere before the weekly pool is
+  drained. Antigravity reports no quota; there the owner's `rolling_limits` are the only guard.
 - **Provider errors win:** a real usage-limit or rate-limit error puts that identity into cooldown
   (using the reset or retry-after time when the CLI reports one) and triggers the same fallback.
 - **Profiles** (`profile:` text) are shown to the Tech Lead so it picks the right pool when it

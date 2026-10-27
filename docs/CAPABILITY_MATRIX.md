@@ -11,6 +11,7 @@ otherwise. Re-check on the deployment host with `agentbridge agents detect` and
 | Structured output | `--json-schema` → `structured_output` ✅ | `--json-schema` → `structured_output` ✅ | `--output-schema` + `--output-last-message` ✅ | prompt + parse (unverified) | prompt + parse, validated ✅ (N100) | ✅ |
 | Token usage reported | ✅ `usage` (+ cache tokens, `total_cost_usd`) | ✅ `usage.input_tokens/output_tokens` | ✅ NDJSON `usage` | no | `usage` if API returns it | none |
 | Separate identities | ✅ `CLAUDE_CONFIG_DIR` (fresh dir = logged out) | ❌ none found; single host identity | `CODEX_HOME` (unverified) | ❌ not assumed | per API key | n/a |
+| Real quota readable | ✅ `rate_limit_event` in stream-json: 5h/7d utilisation, reset time, allowed/rejected | ❌ only token usage | ❓ parser for `rate_limits` ready, shape unverified | ❌ | ✅ `GET /credits/` | n/a |
 | Non-interactive auth check | ✅ `claude auth status --json` | ✅ `agy models` (no prompt sent) | ✅ `codex login status` | ❌ | `GET /credits/` + `/models/` (real balance) | n/a |
 | Tool restriction | ✅ `--tools ""`, `--allowedTools`, `--permission-prompts none` | `--mode plan / accept-edits`, `--sandbox` | `--sandbox read-only / workspace-write` | `--approval-mode` | no tools | n/a |
 | File editing in worktree | yes (acceptEdits + allowlist) | ✅ verified (fixed `calc.py`) | expected | expected | ❌ text only | ✅ |
@@ -30,6 +31,11 @@ otherwise. Re-check on the deployment host with `agentbridge agents detect` and
 6. Bug found by the real run and fixed: Claude Code's `--json-schema` is strict and rejects
    Pydantic's `discriminator` keyword. Schemas are now exported without it
    (`decisions.portable_schema`), with a regression test.
+8. `claude -p --output-format stream-json --verbose` emits `rate_limit_event` with
+   `unifiedWindows.five_hour/seven_day.{utilization,resetsAt,status}`; `--json-schema` still
+   yields `structured_output` in the final `result` event. AgentBridge's Claude adapter uses this
+   mode and stores the report after every call (verified end to end with `agents smoke`).
+   `agy` (json and stream-json) reports tokens only.
 7. `CLAUDE_CONFIG_DIR=<fresh dir> claude auth status --json` → `loggedIn: false`; default dir
    → `loggedIn: true, authMethod: claude.ai`.
 

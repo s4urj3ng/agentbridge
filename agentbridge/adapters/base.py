@@ -84,6 +84,9 @@ class AgentResult:
     retry_after_s: int | None = None
     detail: str = ""
     duration_s: float | None = None
+    # Quota reported by the provider itself, normalised:
+    # {"source": str, "windows": {name: {"used_pct": float, "resets_at": iso|None, "status": str|None}}}
+    provider_quota: dict[str, Any] | None = None
 
 
 _RATE = re.compile(r"(rate[ _-]?limit|too many requests|\b429\b|overloaded|resource[_ ]exhausted)", re.I)

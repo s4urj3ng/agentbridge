@@ -41,6 +41,9 @@ def _windows(a: sqlite3.Row) -> list[dict[str, Any]]:
     return wins
 
 
+WINDOW_LABELS = {"five_hour": "5h", "seven_day": "7d"}
+
+
 def _label(hours: float) -> str:
     return f"{hours / 24:g}d" if hours >= 24 and hours % 24 == 0 else f"{hours:g}h"
 
@@ -72,7 +75,18 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         week = row(conn, "SELECT COUNT(*) n, SUM(input_tokens) i, SUM(output_tokens) o FROM quota_usage "
                          "WHERE agent_id=? AND started_at >= ?", a["id"],
                    (now - timedelta(days=7)).isoformat(timespec="seconds"))
+        provider = []
+        pq = jload(a["provider_quota_json"], None)
+        for name, w in ((pq or {}).get("windows") or {}).items():
+            resets = parse_ts(w.get("resets_at"))
+            stale = bool(resets and resets <= now)   # window has reset since the last report
+            used = w.get("used_pct")
+            provider.append({"name": name, "label": WINDOW_LABELS.get(name, name), "used_pct": used,
+                             "left_pct": None if used is None or stale else max(0, round(100 - used)),
+                             "resets_at": w.get("resets_at"), "status": w.get("status"), "stale": stale})
         out.append({"id": a["id"], "provider": a["provider"], "model": cfg.get("model"), "state": state,
+                    "provider_windows": provider, "provider_source": (pq or {}).get("source"),
+                    "provider_quota_at": a["provider_quota_at"],
                     "until": until.isoformat(timespec="minutes") if until else None,
                     "reason": a["cooldown_reason"], "windows": wins, "running": running_count(conn, a["id"]),
                     "max_concurrency": a["max_concurrency"],

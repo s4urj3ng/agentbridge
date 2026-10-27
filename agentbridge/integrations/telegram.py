@@ -98,8 +98,8 @@ class TelegramBot:
 
     # ------------------------------------------------------------ views
     def quota_text(self) -> tuple[str, list]:
-        lines = ["<b>📊 Quota</b>", "<i>% còn lại của ngân sách bạn đặt cho AgentBridge. "
-                                   "Nhà cung cấp không công bố quota thật; trạng thái 🔴 là do họ báo lỗi giới hạn.</i>", ""]
+        lines = ["<b>📊 Quota</b>", "<i>✅ = số thật do nhà cung cấp báo ở lần gọi gần nhất. "
+                                   "📐 = ngân sách bạn đặt cho AgentBridge (nhà cung cấp không công bố quota).</i>", ""]
         buttons = []
         for a in quota_report(self.conn):
             icon = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🟠", "paused": "⏸"}[a["state"]]
@@ -113,10 +113,20 @@ class TelegramBot:
                 lines.append(f"   lỗi liên tiếp, tạm ngắt đến {self.t(a['until'])}")
             elif a["state"] == "paused":
                 lines.append(f"   tạm dừng: {esc(a['reason'] or 'bởi chủ')}")
+            for w in a["provider_windows"]:
+                if w["stale"]:
+                    lines.append(f"   ✅ {w['label']:>3} đã reset lúc {self.t(w['resets_at'])} (chưa đo lại)")
+                elif w["left_pct"] is not None:
+                    lines.append(f"   ✅ {w['label']:>3} {bar(w['left_pct'])} còn {w['left_pct']}%"
+                                 + (f" · reset {self.t(w['resets_at'])}" if w["resets_at"] else ""))
+                else:
+                    lines.append(f"   ✅ {w['label']:>3} {w['status']} · reset {self.t(w['resets_at'])}")
+            if a["provider_windows"]:
+                lines.append(f"      <i>đo lúc {self.t(a['provider_quota_at'])}</i>")
             for w in a["windows"]:
-                lines.append(f"   {w['label']:>3} {bar(w['left_pct'])} {w['left_pct']}% ({w['used']}/{w['max']})")
-            if not a["windows"]:
-                lines.append(f"   không đặt ngân sách · 7 ngày: {a['calls_7d']} lượt")
+                lines.append(f"   📐 {w['label']:>3} {bar(w['left_pct'])} {w['left_pct']}% ({w['used']}/{w['max']})")
+            if not a["windows"] and not a["provider_windows"]:
+                lines.append(f"   không có số liệu quota · 7 ngày: {a['calls_7d']} lượt")
             buttons.append({"text": a["id"], "callback_data": f"agent:{a['id']}"[:64]})
         kb = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
         return "\n".join(lines), kb
@@ -128,8 +138,11 @@ class TelegramBot:
         lines = [f"<b>{esc(a['id'])}</b> ({esc(a['provider'])}, {esc(a['model'] or '-')})",
                  f"Trạng thái: {a['state']}" + (f" đến {self.t(a['until'])}" if a["until"] else ""),
                  f"7 ngày: {a['calls_7d']} lượt, {a['tokens_7d']:,} token (khi CLI có báo)"]
+        for w in a["provider_windows"]:
+            lines.append(f"✅ {a['provider_source']}: {w['label']} đã dùng {w['used_pct']}% "
+                         f"({w['status']}), reset {self.t(w['resets_at'])}" + (" — đã qua, chưa đo lại" if w["stale"] else ""))
         for w in a["windows"]:
-            lines.append(f"{w['label']}: dùng {w['used']}/{w['max']} → còn {w['left_pct']}%")
+            lines.append(f"📐 ngân sách {w['label']}: dùng {w['used']}/{w['max']} → còn {w['left_pct']}%")
         if a["last_limit_error"]:
             lines.append(f"Lần cuối nhà cung cấp báo giới hạn: {self.t(a['last_limit_error']['started_at'])} "
                          f"({a['last_limit_error']['outcome']})")

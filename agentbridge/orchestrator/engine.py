@@ -469,6 +469,7 @@ class Engine:
                  attempt_id))
             quota.record_end(self.conn, attempt_id, res.outcome, res.duration_s, res.input_tokens, res.output_tokens,
                              res.retry_after_s)
+            quota.record_provider_quota(self.conn, a["agent_id"], res.provider_quota)
             for name, kind in (("stdout.log", "stdout"), ("stderr.log", "stderr")):
                 if (run_dir / name).exists():
                     self._artifact(a["task_id"], attempt_id, kind, run_dir / name)

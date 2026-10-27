@@ -5,12 +5,15 @@ Check quota and progress, and get notified, without touching the server.
 - **Outbound only:** long polling to `api.telegram.org`, no webhook, no open port.
 - **Buttons:** 📊 Quota · 📁 Dự án (projects) · 📝 Chờ duyệt (approvals) · 🔄 Làm mới (refresh).
   Commands: `/status`, `/quota`, `/approvals`.
-- **Quota view:** for each enabled agent, the % left of the budget **you** configured per window
-  (`rolling_limits`, daily/weekly limits), shown with a bar. Next to it is the state the provider
-  reported: 🔴 cooldown after a limit error (with the time it ends), 🟠 circuit open, ⏸ paused
-  (for example a lost login). Subscription providers do not publish remaining quota, so the bot
-  never invents it. Tap an agent for details: calls and tokens over 7 days, and the last limit
-  error.
+- **Quota view:** for each enabled agent:
+  - ✅ **real numbers reported by the provider** at its last call: Claude Code's 5-hour and 7-day
+    % left with reset times (and Codex's, once its output shape is confirmed). A window whose
+    reset time has passed is shown as "đã reset (chưa đo lại)" (reset, not measured since), not
+    as a stale number. `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
+  - 📐 % left of the budget **you** configured (`rolling_limits`). This is the only guard for
+    Antigravity, which reports no quota.
+  - state: 🔴 cooldown (until the provider's reset time), 🟠 circuit open, ⏸ paused.
+  Tap an agent for details.
 - **Notifications** (configurable via `telegram.notify`): milestone completed, task completed,
   task blocked, approval requested, agent cooldown, agent lost its login, agent circuit open,
   quota fallback reroutes, engine stopped or restarted, internal engine errors, draft PR opened.
