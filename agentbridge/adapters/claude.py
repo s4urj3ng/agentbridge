@@ -114,6 +114,8 @@ class ClaudeAdapter(AgentAdapter):
         model = req.model or self.config.get("model")
         if model:
             argv += ["--model", model]
+        if self.config.get("effort"):   # verified flag: --effort low|medium|high|xhigh|max
+            argv += ["--effort", str(self.config["effort"])]
         if req.purpose == "tech_lead":
             argv += ["--tools", ""]
         elif req.purpose == "review":

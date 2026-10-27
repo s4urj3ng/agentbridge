@@ -112,6 +112,26 @@ class Engine:
             raise ValueError(f"unknown agent {agent_id}")
         return make_adapter(a["provider"], agent_id, jload(a["config_json"], {}))
 
+    def _pick_agent(self, agent_id: str, purpose: str, allowed: list[str]) -> tuple[str | None, str]:
+        """The agent itself if admitted, else the first admitted entry of its `fallback_to` list.
+
+        Fallback happens only for quota/health refusals (cooldown, rolling window, budget,
+        circuit), never for paused/disabled agents, and only to agents the project allows in
+        that role. This keeps scarce windows from being waited on or drained into weekly quota.
+        """
+        ok, why = quota.admission(self.conn, agent_id, purpose)
+        if ok:
+            return agent_id, ""
+        if not quota.is_quota_block(why):
+            return None, why
+        r = row(self.conn, "SELECT config_json FROM agents WHERE id=?", agent_id)
+        for fb in (jload(r["config_json"], {}).get("fallback_to") or []) if r else []:
+            if fb == agent_id or fb not in allowed or self._config_problem(fb):
+                continue
+            if quota.admission(self.conn, fb, purpose)[0]:
+                return fb, f"{agent_id}: {why}"
+        return None, why
+
     def _config_problem(self, agent_id: str) -> str | None:
         """Static adapter-config refusal (e.g. a model outside the allowed quota pool)."""
         ad = self.adapter(agent_id)
@@ -880,9 +900,16 @@ class Engine:
                 break
             if f"task:{t['id']}" in self.jobs:
                 continue
-            ok, why = quota.admission(self.conn, t["assignee"], "work")
-            if not ok:
-                continue  # this agent is unavailable; other agents' tasks still dispatch
+            m = self.manifest(t["project_id"])
+            agent, why = self._pick_agent(t["assignee"], "work", self._agent_roster(m)["workers"])
+            if agent is None:
+                continue  # this agent (and its fallbacks) is unavailable; other agents' tasks still dispatch
+            if agent != t["assignee"]:
+                with tx(self.conn):
+                    self.conn.execute("UPDATE tasks SET assignee=?, updated_at=? WHERE id=?", (agent, now_iso(), t["id"]))
+                    audit(self.conn, "quota", "task.fallback", project_id=t["project_id"], task_id=t["id"],
+                          src=t["assignee"], dst=agent, reason=why)
+                t = row(self.conn, "SELECT * FROM tasks WHERE id=?", t["id"])
             problem = self._config_problem(t["assignee"])
             if problem:
                 if self._safe_transition(t["id"], S.BLOCKED, problem, blocked_reason=problem):
@@ -891,7 +918,6 @@ class Engine:
                                  task_id=t["id"], payload={"reason": f"{t['assignee']}: {problem}; reassign"},
                                  dedupe_key=f"blocked:{t['id']}:config:{t['state_version']}")
                 continue
-            m = self.manifest(t["project_id"])
             hits = hardware_no_go_hits(f"{t['title']}\n{t['description']}", m.policy.denied_categories())
             if hits:
                 self._safe_transition(t["id"], S.BLOCKED, f"hardware no-go: {hits}", blocked_reason="hardware no-go")
@@ -917,9 +943,17 @@ class Engine:
             if row(self.conn, "SELECT 1 FROM execution_attempts WHERE task_id=? AND purpose='review' AND "
                               "status IN ('STARTING','RUNNING')", t["id"]):
                 continue
-            ok, _ = quota.admission(self.conn, t["reviewer"], "review")
-            if not ok:
+            m = self.manifest(t["project_id"])
+            reviewers = [r for r in self._agent_roster(m)["reviewers"] if r != t["assignee"]]
+            agent, why = self._pick_agent(t["reviewer"], "review", reviewers)
+            if agent is None:
                 continue
+            if agent != t["reviewer"]:
+                with tx(self.conn):
+                    self.conn.execute("UPDATE tasks SET reviewer=? WHERE id=?", (agent, t["id"]))
+                    audit(self.conn, "quota", "review.fallback", project_id=t["project_id"], task_id=t["id"],
+                          src=t["reviewer"], dst=agent, reason=why)
+                t = row(self.conn, "SELECT * FROM tasks WHERE id=?", t["id"])
             problem = self._config_problem(t["reviewer"])
             if problem:
                 with tx(self.conn):

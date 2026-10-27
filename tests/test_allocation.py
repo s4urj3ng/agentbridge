@@ -89,3 +89,60 @@ def test_config_disable_wins_over_db(settings):
             a["enabled"] = False
     e.sync_agents()
     assert q(e, "SELECT enabled FROM agents WHERE id='mock-reviewer'")[0]["enabled"] == 0
+
+
+def test_worker_falls_back_when_quota_exhausted(settings, tmp_path):
+    """Flash-style default worker hits its usage limit → the task moves to the configured fallback."""
+    for a in settings.agents:
+        if a["id"] == "mock-worker":
+            a.update(fail_mode="usage_limit", fail_times=99, fallback_to=["mock-worker-b"])
+    e = make_engine(settings)
+    register(e, tmp_path)
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul()", "F1")
+    run(e, 120)
+    assert q(e, "SELECT status FROM milestones WHERE id=?", mid)[0]["status"] == "COMPLETED"
+    fb = q(e, "SELECT detail_json FROM audit_log WHERE action='task.fallback'")
+    assert fb and '"dst": "mock-worker-b"' in fb[0]["detail_json"]
+    assert q(e, "SELECT COUNT(*) c FROM execution_attempts WHERE agent_id='mock-worker'")[0]["c"] == 1
+    assert {t["assignee"] for t in q(e, "SELECT assignee FROM tasks")} == {"mock-worker-b"}
+
+
+def test_reviewer_falls_back_when_5h_window_full(settings, tmp_path):
+    """Preferred reviewer's 5-hour window is full → review goes to the fallback instead of waiting."""
+    settings.agents.append({"id": "mock-reviewer-2", "provider": "mock", "roles": ["reviewer"]})
+    for a in settings.agents:
+        if a["id"] == "mock-reviewer":
+            a.update(rolling_limits=[{"hours": 5, "max": 0}], fallback_to=["mock-reviewer-2"])
+    e = make_engine(settings)
+    register(e, tmp_path, reviewers=["mock-reviewer", "mock-reviewer-2"])
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul()", "F2")
+    run(e, 120)
+    assert q(e, "SELECT status FROM milestones WHERE id=?", mid)[0]["status"] == "COMPLETED"
+    assert q(e, "SELECT reviewer FROM reviews WHERE source='agent'") == [{"reviewer": "mock-reviewer-2"}]
+    assert q(e, "SELECT COUNT(*) c FROM execution_attempts WHERE agent_id='mock-reviewer'")[0]["c"] == 0
+    assert q(e, "SELECT COUNT(*) c FROM audit_log WHERE action='review.fallback'")[0]["c"] == 1
+
+
+def test_no_fallback_for_paused_agent(settings, tmp_path):
+    for a in settings.agents:
+        if a["id"] == "mock-worker":
+            a["fallback_to"] = ["mock-worker-b"]
+    e = make_engine(settings)
+    roster = ["mock-worker", "mock-worker-b"]
+    e.conn.execute("UPDATE agents SET paused=1 WHERE id='mock-worker'")
+    assert e._pick_agent("mock-worker", "work", roster) == (None, "paused")
+    e.conn.execute("UPDATE agents SET paused=0, cooldown_until=?, cooldown_reason='usage_limited' WHERE id='mock-worker'",
+                   (now_iso(600),))
+    assert e._pick_agent("mock-worker", "work", roster)[0] == "mock-worker-b"
+    assert e._pick_agent("mock-worker", "work", ["mock-worker"])[0] is None   # fallback must be allowed by project
+
+
+def test_effort_flags(tmp_path):
+    from agentbridge.adapters.base import ExecRequest
+    from agentbridge.adapters.claude import ClaudeAdapter
+    from agentbridge.adapters.codex import CodexAdapter
+    req = ExecRequest("work", "p", tmp_path, tmp_path, 60, None)
+    argv = ClaudeAdapter("c", {"model": "claude-opus-5-5", "effort": "medium"}).prepare(req).argv
+    assert argv[argv.index("--model") + 1] == "claude-opus-5-5" and argv[argv.index("--effort") + 1] == "medium"
+    argv = CodexAdapter("x", {"model": "gpt-6.1", "reasoning_effort": "high"}).prepare(req).argv
+    assert "model_reasoning_effort=high" in argv and argv[-1] == "-"

@@ -76,6 +76,11 @@ def admission(conn: sqlite3.Connection, agent_id: str, purpose: str) -> tuple[bo
     return True, "ok"
 
 
+def is_quota_block(why: str) -> bool:
+    """Refusals caused by quota/health (worth falling back), as opposed to paused/disabled/busy."""
+    return why.startswith(("cooldown", "circuit", "daily invocation", "weekly invocation")) or "window budget" in why
+
+
 def window_count(conn: sqlite3.Connection, agent_id: str, hours: float) -> int:
     since = (utcnow() - timedelta(hours=hours)).isoformat(timespec="seconds")
     return row(conn, "SELECT COUNT(*) c FROM quota_usage WHERE agent_id=? AND started_at >= ?", agent_id, since)["c"]

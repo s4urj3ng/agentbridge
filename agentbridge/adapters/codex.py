@@ -83,6 +83,8 @@ class CodexAdapter(AgentAdapter):
         model = req.model or self.config.get("model")
         if model:
             argv += ["--model", model]
+        if self.config.get("reasoning_effort"):   # codex config key, passed via the verified -c override
+            argv += ["-c", f"model_reasoning_effort={self.config['reasoning_effort']}"]
         argv.append("-")  # read prompt from stdin
         return Invocation(argv=argv, env=self._env(), cwd=req.cwd, stdin_prompt=req.prompt)
 
