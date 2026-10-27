@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import jload, parse_ts, row, rows, utcnow
-from .orchestrator.quota import running_count, window_count
+from .orchestrator.quota import provider_block, running_count, window_count
 
 
 def engine_running(data_dir: Path) -> bool:
@@ -62,7 +62,7 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             used = window_count(conn, a["id"], w["hours"])
             left = max(0.0, 1 - used / w["max"]) if w["max"] > 0 else 0.0
             wins.append(w | {"used": used, "left_pct": round(left * 100)})
-        state, until = "ok", None
+        state, until, a_reason = "ok", None, None
         cu, co = parse_ts(a["cooldown_until"]), parse_ts(a["circuit_open_until"])
         if a["paused"]:
             state = "paused"
@@ -70,6 +70,11 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             state, until = "cooldown", cu
         elif co and co > now:
             state, until = "circuit_open", co
+        else:
+            stop = provider_block(a, now)   # provider numbers past the owner's stop level
+            if stop:
+                state = "provider_stop"
+                a_reason = stop
         last_limit = row(conn, "SELECT started_at, outcome FROM quota_usage WHERE agent_id=? AND outcome IN "
                                "('rate_limited','usage_limited') ORDER BY id DESC LIMIT 1", a["id"])
         week = row(conn, "SELECT COUNT(*) n, SUM(input_tokens) i, SUM(output_tokens) o FROM quota_usage "
@@ -85,10 +90,11 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                              "left_pct": None if used is None or stale else max(0, round(100 - used)),
                              "resets_at": w.get("resets_at"), "status": w.get("status"), "stale": stale})
         out.append({"id": a["id"], "provider": a["provider"], "model": cfg.get("model"), "state": state,
+                    "fallback_to": cfg.get("fallback_to") or [],
                     "provider_windows": provider, "provider_source": (pq or {}).get("source"),
                     "provider_quota_at": a["provider_quota_at"],
                     "until": until.isoformat(timespec="minutes") if until else None,
-                    "reason": a["cooldown_reason"], "windows": wins, "running": running_count(conn, a["id"]),
+                    "reason": a_reason if state == "provider_stop" else a["cooldown_reason"], "windows": wins, "running": running_count(conn, a["id"]),
                     "max_concurrency": a["max_concurrency"],
                     "last_limit_error": dict(last_limit) if last_limit else None,
                     "calls_7d": week["n"] or 0, "tokens_7d": (week["i"] or 0) + (week["o"] or 0)})

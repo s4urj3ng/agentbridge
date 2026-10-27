@@ -39,6 +39,16 @@ MAIN_MENU = [[{"text": "📊 Quota", "callback_data": "quota"}, {"text": "📁 D
              [{"text": "📝 Chờ duyệt", "callback_data": "approvals"}, {"text": "🔄 Làm mới", "callback_data": "refresh"}]]
 
 
+def _stop_text(reason: str) -> str:
+    """'provider window seven_day at 95% (stop at 85%) until …' → 'tuần đã dùng 95% (ngưỡng 85%)'."""
+    import re
+    m = re.search(r"provider window (\w+) (?:at ([\d.]+)% \(stop at ([\d.]+)%\)|exhausted)", reason or "")
+    if not m:
+        return reason or ""
+    name = {"five_hour": "5h", "seven_day": "tuần"}.get(m.group(1), m.group(1))
+    return f"{name} đã hết" if m.group(2) is None else f"{name} đã dùng {m.group(2)}% (ngưỡng {m.group(3)}%)"
+
+
 def bar(pct: int, width: int = 10) -> str:
     filled = max(0, min(width, round(pct * width / 100)))
     return "▓" * filled + "░" * (width - filled)
@@ -116,11 +126,11 @@ class TelegramBot:
 
     def quota_text(self) -> tuple[str, list]:
         self.refresh_quota()
-        lines = ["<b>📊 Quota</b>", "<i>✅ = số thật do nhà cung cấp báo ở lần gọi gần nhất. "
-                                   "📐 = ngân sách bạn đặt cho AgentBridge (nhà cung cấp không công bố quota).</i>", ""]
+        lines = ["<b>📊 Quota</b>", "<i>✅ số thật nhà cung cấp báo · 📐 ngân sách bạn đặt · "
+                                   "🟡 vượt ngưỡng, việc chuyển sang agent dự phòng</i>", ""]
         buttons = []
         for a in quota_report(self.conn):
-            icon = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🟠", "paused": "⏸"}[a["state"]]
+            icon = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🟠", "paused": "⏸", "provider_stop": "🟡"}[a["state"]]
             head = f"{icon} <b>{esc(a['id'])}</b> · {esc(a['model'] or a['provider'])}"
             if a["running"]:
                 head += f" · đang chạy {a['running']}/{a['max_concurrency']}"
@@ -129,6 +139,10 @@ class TelegramBot:
                 lines.append(f"   nghỉ đến {self.t(a['until'])} ({esc(a['reason'])})")
             elif a["state"] == "circuit_open":
                 lines.append(f"   lỗi liên tiếp, tạm ngắt đến {self.t(a['until'])}")
+            elif a["state"] == "provider_stop":
+                fb = a.get("fallback_to") or []
+                lines.append(f"   đang nhường việc: {esc(_stop_text(a['reason']))}"
+                             + (f" → {esc(', '.join(fb))}" if fb else ""))
             elif a["state"] == "paused":
                 lines.append(f"   tạm dừng: {esc(a['reason'] or 'bởi chủ')}")
             for w in a["provider_windows"]:

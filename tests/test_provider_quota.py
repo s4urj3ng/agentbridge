@@ -152,3 +152,17 @@ def test_free_probe_includes_codex(settings, tmp_path):
     assert res["codex-reviewer"]["windows"]["seven_day"]["used_pct"] == 11.0
     stored = json.loads(q(e, "SELECT provider_quota_json FROM agents WHERE id='codex-reviewer'")[0]["provider_quota_json"])
     assert stored["source"] == "codex rollout rate_limits"
+
+
+def test_telegram_marks_agent_past_stop_level(settings):
+    from agentbridge.integrations.telegram import TelegramBot
+    settings.agents.append({"id": "claude-pro", "provider": "claude", "roles": ["worker"],
+                            "provider_stop_pct": {"seven_day": 85}, "fallback_to": ["antigravity-argon"]})
+    e = make_engine(settings)
+    _set_pq(e, "claude-pro", {"seven_day": {"used_pct": 95.0, "resets_at": now_iso(80000), "status": "allowed"}})
+    settings.telegram = {"allowed_chat_ids": [1], "timezone": "UTC"}
+    bot = TelegramBot(settings, token="1:x", conn=connect(settings.db_path), client=httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": True}))))
+    text, _ = bot.quota_text()
+    assert "🟡 <b>claude-pro</b>" in text
+    assert "đang nhường việc: tuần đã dùng 95% (ngưỡng 85%) → antigravity-argon" in text
