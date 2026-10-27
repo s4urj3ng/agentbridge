@@ -143,9 +143,9 @@ class Engine:
 
     def detect_agents(self) -> dict[str, dict]:
         out = {}
-        for a in rows(self.conn, "SELECT id FROM agents ORDER BY id"):
+        for a in rows(self.conn, "SELECT id, enabled FROM agents ORDER BY id"):
             ad = self.adapter(a["id"])
-            cap = ad.detect().to_dict()
+            cap = {"enabled": bool(a["enabled"])} | ad.detect().to_dict()
             auth = ad.validate_auth()
             cap["auth"] = {"state": auth.state, "method": auth.method, "detail": redact(auth.detail)}
             with tx(self.conn):

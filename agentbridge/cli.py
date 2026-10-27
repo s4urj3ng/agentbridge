@@ -87,6 +87,10 @@ def cmd_events(args):
 
 def cmd_agents(args):
     e = _engine(args)
+    known = [r["id"] for r in rows(e.conn, "SELECT id FROM agents ORDER BY id")]
+    if args.agent and args.agent not in known:
+        sys.exit(f"unknown agent {args.agent!r}. Known: {', '.join(known)}\n"
+                 "(identities come from the config file; edit it and restart the services)")
     if args.action == "list":
         _print([dict(r) | {"roles": json.loads(r["roles_json"])} for r in rows(
             e.conn, "SELECT id, provider, roles_json, enabled, paused, max_concurrency, daily_invocation_limit, "
