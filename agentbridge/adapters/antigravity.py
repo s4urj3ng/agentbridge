@@ -22,6 +22,7 @@ so it is capped below Linux's 128 KiB per-argument limit.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from ..policies.safety import PolicyViolation, redact
@@ -31,6 +32,7 @@ from .base import (MAX_ARG_PROMPT, AgentAdapter, AgentResult, AuthStatus, Capabi
 
 
 EXTERNAL_MODEL_PREFIXES = ("claude-", "gpt-oss")
+_USAGE_CACHE: dict[str, tuple[float, dict | None]] = {}
 
 
 class AntigravityAdapter(AgentAdapter):
@@ -60,7 +62,7 @@ class AntigravityAdapter(AgentAdapter):
             cap.available = False
             cap.notes.append(why)
         if cap.available:
-            pq = self.quota_for(self.read_usage())
+            pq = self.quota_for(self.read_usage_cached())
             if pq:
                 left = ", ".join(f"{k} {100 - w['used_pct']:.0f}% left" for k, w in pq["windows"].items())
                 cap.notes.append(f"real quota via /usage ({pq['group']}): {left}")
@@ -143,9 +145,24 @@ class AntigravityAdapter(AgentAdapter):
         exe = self.executable
         if not exe:
             return None
-        r = process.run_cmd([exe, "--print", "/usage", "--output-format", "json"], cwd=Path.home(),
-                            timeout_s=90, env=self.base_env())
-        return parse_usage(r.stdout) if r.exit_code == 0 else None
+        # /usage normally answers in a few seconds, but on the N100 a call occasionally hung for
+        # minutes. Keep each try short and retry once rather than block detect/probes.
+        for _ in range(2):
+            r = process.run_cmd([exe, "--print", "/usage", "--output-format", "json"], cwd=Path.home(),
+                                timeout_s=float(self.config.get("usage_timeout_s", 20)), env=self.base_env())
+            if r.exit_code == 0:
+                return parse_usage(r.stdout)
+        return None
+
+    def read_usage_cached(self, max_age_s: float = 60) -> dict[str, dict] | None:
+        """One /usage call serves every identity sharing this executable (same host login)."""
+        key = self.executable or ""
+        hit = _USAGE_CACHE.get(key)
+        if hit and time.time() - hit[0] < max_age_s:
+            return hit[1]
+        groups = self.read_usage()
+        _USAGE_CACHE[key] = (time.time(), groups)
+        return groups
 
     def quota_for(self, groups: dict[str, dict] | None) -> dict | None:
         """The /usage group that governs this identity's model."""

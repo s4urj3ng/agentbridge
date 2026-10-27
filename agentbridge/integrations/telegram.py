@@ -101,11 +101,18 @@ class TelegramBot:
         """Free probes (Antigravity /usage, 0 tokens) when the last one is older than max_age_s."""
         from ..quota_probe import probe_age_s, refresh_free_quotas
         age = probe_age_s(self.conn)
-        if age is None or age > max_age_s:
+        if age is not None and age <= max_age_s:
+            return
+        # time-boxed: if the provider command is slow, show the last stored numbers instead of freezing
+        import threading
+        def work():
             try:
-                refresh_free_quotas(self.s, self.conn)
+                refresh_free_quotas(self.s)   # own DB connection: safe in a thread
             except Exception as e:
                 log.warning("quota probe failed: %s", redact(str(e)))
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        t.join(timeout=25)
 
     def quota_text(self) -> tuple[str, list]:
         self.refresh_quota()

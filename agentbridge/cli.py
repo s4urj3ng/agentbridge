@@ -96,7 +96,7 @@ def cmd_agents(args):
             e.conn, "SELECT id, provider, roles_json, enabled, paused, max_concurrency, daily_invocation_limit, "
                     "cooldown_until, cooldown_reason FROM agents ORDER BY id")])
     elif args.action == "detect":
-        _print(e.detect_agents())
+        _print(e.detect_agents(args.agent))
     elif args.action in ("enable", "disable"):
         e.conn.execute("UPDATE agents SET enabled=? WHERE id=?", (int(args.action == "enable"), args.agent))
         print(f"{args.action}d {args.agent}")

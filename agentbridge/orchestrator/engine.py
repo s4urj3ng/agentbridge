@@ -141,9 +141,11 @@ class Engine:
             return None if ok else why
         return None
 
-    def detect_agents(self) -> dict[str, dict]:
+    def detect_agents(self, only: str | None = None) -> dict[str, dict]:
         out = {}
         for a in rows(self.conn, "SELECT id, enabled FROM agents ORDER BY id"):
+            if only and a["id"] != only:
+                continue
             ad = self.adapter(a["id"])
             cap = {"enabled": bool(a["enabled"])} | ad.detect().to_dict()
             auth = ad.validate_auth()

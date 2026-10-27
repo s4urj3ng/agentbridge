@@ -76,3 +76,24 @@ def test_telegram_quota_view_probes_antigravity(settings, tmp_path):
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": True}))))
     text, _ = bot.quota_text()
     assert "agy-argon" in text and "✅  7d" in text and "còn 96%" in text
+
+
+def test_usage_hang_is_bounded_and_retried(tmp_path):
+    """A hanging /usage must not block: short timeout, one retry, then None."""
+    import time
+    from agentbridge.adapters.antigravity import AntigravityAdapter
+    exe = tmp_path / "agy"
+    exe.write_text("#!/bin/sh\nsleep 30\n")
+    exe.chmod(0o755)
+    ad = AntigravityAdapter("x", {"executable": str(exe), "model": "gemini-3.8-flash-high", "usage_timeout_s": 1})
+    t0 = time.time()
+    assert ad.read_usage() is None
+    assert time.time() - t0 < 10
+
+
+def test_run_cmd_not_blocked_by_detached_child(tmp_path):
+    import time
+    from agentbridge.workers.process import run_cmd
+    t0 = time.time()
+    r = run_cmd(["sh", "-c", "setsid sleep 30 & sleep 30"], cwd=tmp_path, timeout_s=1)
+    assert r.timed_out and time.time() - t0 < 10

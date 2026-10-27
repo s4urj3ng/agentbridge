@@ -137,7 +137,17 @@ def run_cmd(argv: list[str], *, cwd: Path | str, timeout_s: float = 120, env: di
             os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        out, err = p.communicate()
+        try:
+            # a grandchild that left the process group can keep the pipes open; don't wait on it
+            out, err = p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            for f in (p.stdout, p.stderr):
+                try:
+                    f.close()
+                except OSError:
+                    pass
+            p.wait(timeout=5)
+            out, err = "", "timed out; output pipes held by a detached child"
         timed_out = True
     res = CmdResult(argv, p.returncode if not timed_out else -9, out, err, time.time() - t0, timed_out)
     if check and res.exit_code != 0:
