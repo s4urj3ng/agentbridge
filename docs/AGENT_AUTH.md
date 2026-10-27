@@ -82,13 +82,42 @@ Not installed during development. If installed and separately authenticated (`ge
 the adapter uses `gemini -p <prompt> --output-format json [--approval-mode auto_edit]`;
 `detect()` checks for those flags first.
 
-## Mindlogic (optional, disabled)
+## Mindlogic (아주LLM) API Gateway (optional, disabled by default)
 
-OpenAI-compatible HTTP API. Put `MINDLOGIC_API_KEY` in `/etc/agentbridge/agentbridge.env`
-(mode 640, root:agentbridge) and set `base_url` / `model` in `agentbridge.yaml`, then enable it.
-It is text-only (reviewer role), is never used as Tech Lead automatically, and its ~8,000
-credits/month are **not** converted into tokens or money: budget it with invocation limits.
-No endpoint or credentials were available during development, so it is unverified.
+Gateway facts used by the adapter (docs.mindlogic.ai → API Gateway, checked 2026-10-27):
+
+- OpenAI-compatible base URL `https://factchat-cloud.mindlogic.ai/v1/gateway`; paths end in `/`
+  (`/chat/completions/`, `/models/`, `/credits/`).
+- Anthropic-native base URL `https://factchat-cloud.mindlogic.ai/v1/gateway/claude`. With a custom
+  base URL, Claude Code needs `ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY`.
+- One key reaches many providers' models; `GET /models/` lists what your organisation may use.
+- `GET /credits/` returns the real balance. Rate limit: 120 requests / 60 s (429, sometimes
+  without Retry-After).
+
+Setup:
+
+```bash
+sudoedit /etc/agentbridge/agentbridge.env        # add: MINDLOGIC_API_KEY=<key>   (never commit it)
+sudoedit /etc/agentbridge/agentbridge.yaml       # add identities from examples/agentbridge.example.yaml
+sudo systemctl restart agentbridge-engine agentbridge-api
+agentbridge agents detect                        # checks key (/credits/), model availability (/models/), balance
+agentbridge agents enable mindlogic-gpt-reviewer
+agentbridge agents smoke mindlogic-gpt-reviewer
+```
+
+Identities you can define with the same key:
+
+| Identity type | Provider | Role | Edits files | How it is billed |
+|---|---|---|---|---|
+| `mindlogic-*-reviewer` (any LLM id from `/models/`) | `mindlogic` | reviewer | no | gateway credits |
+| `claude-mindlogic-worker` | `claude` with `api_base_url` + `auth_token_env` | worker | yes (Claude Code tools) | gateway credits |
+
+Budgeting: credits are not converted into tokens or money. Use `credit_floor` (calls are refused
+below the real remaining balance and the identity cools down) together with
+`daily_invocation_limit`. Mindlogic identities are never used as Tech Lead automatically.
+
+The gateway adapter is tested against a local fake gateway (`tests/test_mindlogic.py`). Real
+gateway calls still need verifying with `agents smoke` on the server.
 
 ## GitHub
 

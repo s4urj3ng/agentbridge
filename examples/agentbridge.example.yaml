@@ -69,15 +69,41 @@ agents:
     roles: [worker]
     enabled: false
 
-  # --- Mindlogic: OpenAI-compatible API. Disabled; never a Tech Lead fallback.
-  - id: mindlogic-reviewer
+  # --- Mindlogic (아주LLM) API Gateway: ONE key (MINDLOGIC_API_KEY in agentbridge.env), many models.
+  # Text-only reviewers via the OpenAI-compatible endpoint. Never a Tech Lead fallback.
+  # credit_floor: refuse calls once the REAL balance (GET /credits/) drops below it.
+  # Check model ids with `agentbridge agents detect` (it reads the key's /models list).
+  - id: mindlogic-gpt-reviewer
     provider: mindlogic
     roles: [reviewer]
     enabled: false
-    base_url: https://REPLACE-WITH-MINDLOGIC-ENDPOINT/v1
-    model: REPLACE
+    base_url: https://factchat-cloud.mindlogic.ai/v1/gateway
+    model: gpt-5.6-sol
     api_key_env: MINDLOGIC_API_KEY
-    daily_invocation_limit: 20
+    credit_floor: 1500
+    daily_invocation_limit: 15
+  - id: mindlogic-gemini-reviewer
+    provider: mindlogic
+    roles: [reviewer]
+    enabled: false
+    base_url: https://factchat-cloud.mindlogic.ai/v1/gateway
+    model: gemini-3.7-flash
+    api_key_env: MINDLOGIC_API_KEY
+    credit_floor: 1500
+    daily_invocation_limit: 15
+
+  # --- Claude Code running on Mindlogic credits (Anthropic-native gateway endpoint).
+  # A real file-editing worker; separate config dir, never mixed with a subscription login.
+  - id: claude-mindlogic-worker
+    provider: claude
+    roles: [worker]
+    enabled: false
+    api_base_url: https://factchat-cloud.mindlogic.ai/v1/gateway/claude
+    auth_token_env: MINDLOGIC_API_KEY
+    config_dir: /var/lib/agentbridge/identities/claude-mindlogic
+    model: claude-sonnet-5-5
+    max_concurrency: 1
+    daily_invocation_limit: 10
 
   # --- Mock identities for the demo / smoke tests (no quota).
   - {id: mock-lead, provider: mock, roles: [tech_lead]}

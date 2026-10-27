@@ -14,6 +14,14 @@ Identity isolation: each identity gets its own `config_dir`. Log in once per
 identity, interactively, on the host:
     CLAUDE_CONFIG_DIR=/srv/agentbridge/identities/claude-team-lead claude auth login
 Tokens are never copied between identities by AgentBridge.
+
+Gateway mode (e.g. Mindlogic's Anthropic-native endpoint): set
+`api_base_url` and `auth_token_env` (the NAME of an env var holding the key).
+The adapter then exports ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN for that
+identity only. The gateway docs say Claude Code needs ANTHROPIC_AUTH_TOKEN, not
+ANTHROPIC_API_KEY, with a custom base URL. Use a dedicated `config_dir` so the
+identity never mixes with a subscription login. `total_cost_usd` reported by
+the CLI is then a list-price estimate, not gateway credits.
 """
 from __future__ import annotations
 
@@ -41,7 +49,16 @@ class ClaudeAdapter(AgentAdapter):
         cdir = self.config.get("config_dir")
         if cdir:
             env["CLAUDE_CONFIG_DIR"] = str(Path(os.path.expanduser(cdir)))
+        if self.gateway:
+            env["ANTHROPIC_BASE_URL"] = self.config["api_base_url"]
+            token = os.environ.get(self.config.get("auth_token_env", ""), "")
+            if token:
+                env["ANTHROPIC_AUTH_TOKEN"] = token
         return env
+
+    @property
+    def gateway(self) -> bool:
+        return bool(self.config.get("api_base_url"))
 
     def detect(self) -> Capability:
         exe = self.executable
@@ -60,6 +77,8 @@ class ClaudeAdapter(AgentAdapter):
         cap.supports_cwd = True
         cap.can_edit_files = True
         cap.verified = cap.available and cap.headless and cap.structured_output
+        if self.gateway:
+            cap.notes.append(f"gateway mode: {self.config['api_base_url']} (billed to gateway credits)")
         if self.config.get("config_dir"):
             cap.isolated_identity = "verified"
             cap.notes.append("identity isolated via CLAUDE_CONFIG_DIR")
@@ -75,6 +94,11 @@ class ClaudeAdapter(AgentAdapter):
         exe = self.executable
         if not exe:
             return AuthStatus("error", detail="executable not found")
+        if self.gateway:
+            env_name = self.config.get("auth_token_env", "")
+            if not os.environ.get(env_name):
+                return AuthStatus("not_logged_in", method="gateway_token", detail=f"{env_name or 'auth_token_env'} not set")
+            return AuthStatus("unknown", method="gateway_token", detail="token present; verify with `agents smoke`")
         r = process.run_cmd([exe, "auth", "status", "--json"], cwd="/", timeout_s=30, env=self._env())
         try:
             d = json.loads(r.stdout)

@@ -8,10 +8,10 @@ otherwise. Re-check on the deployment host with `agentbridge agents detect` and
 |---|---|---|---|---|---|---|
 | Installed | yes (dev + N100) | yes (dev + N100) | N100 only | **no** | n/a (HTTP) | yes |
 | Headless mode | `-p` ✅ verified | `--print` ✅ verified | `exec` ✅ verified (N100) | `-p` (documented, unverified) | HTTP | ✅ |
-| Structured output | `--json-schema` → `structured_output` ✅ | `--json-schema` → `structured_output` ✅ | `--output-schema` + `--output-last-message` ✅ | prompt + parse (unverified) | prompt + parse (unverified) | ✅ |
+| Structured output | `--json-schema` → `structured_output` ✅ | `--json-schema` → `structured_output` ✅ | `--output-schema` + `--output-last-message` ✅ | prompt + parse (unverified) | prompt + parse, validated (fake-gateway tested) | ✅ |
 | Token usage reported | ✅ `usage` (+ cache tokens, `total_cost_usd`) | ✅ `usage.input_tokens/output_tokens` | ✅ NDJSON `usage` | no | `usage` if API returns it | none |
 | Separate identities | ✅ `CLAUDE_CONFIG_DIR` (fresh dir = logged out) | ❌ none found; single host identity | `CODEX_HOME` (unverified) | ❌ not assumed | per API key | n/a |
-| Non-interactive auth check | ✅ `claude auth status --json` | ✅ `agy models` (no prompt sent) | ✅ `codex login status` | ❌ | key presence only | n/a |
+| Non-interactive auth check | ✅ `claude auth status --json` | ✅ `agy models` (no prompt sent) | ✅ `codex login status` | ❌ | `GET /credits/` + `/models/` (real balance) | n/a |
 | Tool restriction | ✅ `--tools ""`, `--allowedTools`, `--permission-prompts none` | `--mode plan / accept-edits`, `--sandbox` | `--sandbox read-only / workspace-write` | `--approval-mode` | no tools | n/a |
 | File editing in worktree | yes (acceptEdits + allowlist) | ✅ verified (fixed `calc.py`) | expected | expected | ❌ text only | ✅ |
 | Roles in AgentBridge | tech_lead, worker, reviewer | worker, reviewer | worker, reviewer | worker | reviewer | all |
