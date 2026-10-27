@@ -151,6 +151,7 @@ def main() -> int:
     ap.add_argument("--fail-times", type=int, default=0)
     ap.add_argument("--script", default="")
     ap.add_argument("--sleep", type=float, default=0.0)
+    ap.add_argument("--model", default="")
     a = ap.parse_args()
     prompt = sys.stdin.read()
     sd = Path(a.state_dir)

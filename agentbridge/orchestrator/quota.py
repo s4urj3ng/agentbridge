@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 
-from ..db import audit, now_iso, parse_ts, row, tx, utcnow
+from ..db import audit, jload, now_iso, parse_ts, row, tx, utcnow
 
 QUOTA_OUTCOMES = {"rate_limited", "usage_limited"}
 DEFAULT_COOLDOWN = {"rate_limited": 120, "usage_limited": 1800}
@@ -64,7 +64,21 @@ def admission(conn: sqlite3.Connection, agent_id: str, purpose: str) -> tuple[bo
             return False, f"daily invocation budget reached ({d}/{a['daily_invocation_limit']}, purpose={purpose})"
     if a["weekly_invocation_limit"] is not None and w >= a["weekly_invocation_limit"]:
         return False, f"weekly invocation budget reached ({w}/{a['weekly_invocation_limit']})"
+    # Provider-shaped rolling windows, e.g. [{hours: 5, max: 25}, {hours: 168, max: 150}].
+    # These are owner-chosen ceilings to spread usage, not a claim about the provider's real quota.
+    for lim in jload(a["config_json"], {}).get("rolling_limits") or []:
+        hours, cap = float(lim["hours"]), int(lim["max"])
+        if purpose != "review":
+            cap -= int(lim.get("reserve_for_review", 0))
+        n = window_count(conn, agent_id, hours)
+        if n >= cap:
+            return False, f"{hours:g}h window budget reached ({n}/{lim['max']}, purpose={purpose})"
     return True, "ok"
+
+
+def window_count(conn: sqlite3.Connection, agent_id: str, hours: float) -> int:
+    since = (utcnow() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    return row(conn, "SELECT COUNT(*) c FROM quota_usage WHERE agent_id=? AND started_at >= ?", agent_id, since)["c"]
 
 
 def record_start(conn: sqlite3.Connection, agent_id: str, attempt_id: int, purpose: str) -> None:

@@ -8,9 +8,9 @@ project:
   remote_url: https://github.com/s4urj3ng/g3x-lite
   base_branch: main
   tech_lead: claude-team-lead
-  default_worker: claude-personal-worker
-  workers: [antigravity-worker]
-  reviewers: [antigravity-worker, codex-reviewer]
+  default_worker: antigravity-worker          # Gemini 3.8 Flash: routine work
+  workers: [claude-personal-worker, antigravity-argon]
+  reviewers: [antigravity-argon, codex-reviewer]
   review_policy: risk
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
 

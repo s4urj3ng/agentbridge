@@ -8,7 +8,7 @@ limits:
   max_tasks_per_milestone: 20
   max_revisions: 3
   max_validation_retries: 2
-  max_concurrent_agents: 2          # N100: keep total concurrent agent CLIs low
+  max_concurrent_agents: 3          # N100: keep total concurrent agent CLIs low
   default_task_timeout_s: 1800
   tech_lead_timeout_s: 600
   max_event_attempts: 3
@@ -24,44 +24,59 @@ github:
   gh_executable: gh
 
 agents:
-  # --- Tech Lead: Claude Team (Standard seat). Separate CLAUDE_CONFIG_DIR = separate login.
+  # Work allocation (see docs/ALLOCATION.md). rolling_limits are YOUR ceilings to spread usage
+  # across the providers' 5-hour / weekly windows. They are not the providers' real quotas; tune
+  # them after watching `agentbridge agents list` / the Agents page. Provider limit errors still
+  # trigger an automatic cooldown on top of these.
+
+  # --- Tech Lead: Claude Team. Light model for routine events, strong model only for planning
+  # and unblocking. Called only on events, never polled.
   - id: claude-team-lead
     provider: claude
     roles: [tech_lead]
     config_dir: /var/lib/agentbridge/identities/claude-team-lead
-    model: opus
+    model: sonnet
+    event_models: {GOAL_SUBMITTED: opus, VALIDATION_EXHAUSTED: opus, TASK_BLOCKED: opus, HUMAN_DECISION: opus}
     max_concurrency: 1
-    daily_invocation_limit: 80
-    weekly_invocation_limit: 400
+    rolling_limits: [{hours: 5, max: 25}, {hours: 168, max: 150}]
 
-  # --- Coding worker: Claude Personal, independent config dir/login.
+  # --- Default worker: Antigravity Gemini 3.8 Flash. Cheap and abundant.
+  - id: antigravity-worker
+    provider: antigravity
+    roles: [worker, reviewer]
+    model: gemini-3.8-flash-high
+    profile: "DEFAULT worker. Cheap and abundant (5h + weekly windows, rarely exhausted). Use for routine implementation, tests, docs, refactors with clear specs, research."
+    max_concurrency: 2
+    rolling_limits: [{hours: 5, max: 60}]
+
+  # --- Antigravity Gemini 4 Argon: weekly quota. Reviewer first, second choice for hard work.
+  - id: antigravity-argon
+    provider: antigravity
+    roles: [reviewer, worker]
+    model: gemini-4-argon-high
+    profile: "Weekly quota. Preferred independent REVIEWER for non-trivial changes; second choice for hard tasks when Claude is busy or cooling down."
+    max_concurrency: 1
+    rolling_limits: [{hours: 168, max: 60, reserve_for_review: 30}]
+
+  # --- Claude Personal (Pro): scarce (5h + weekly). Only for the hard tasks.
   - id: claude-personal-worker
     provider: claude
     roles: [worker]
     config_dir: /var/lib/agentbridge/identities/claude-personal-worker
     model: sonnet
     permission_mode: acceptEdits
+    profile: "SCARCE (5h + weekly). Only complex or risky code, multi-file changes, subtle bugs, or a task that already failed on the default worker."
     max_concurrency: 1
-    daily_invocation_limit: 40
+    rolling_limits: [{hours: 5, max: 12}, {hours: 168, max: 70}]
 
-  # --- Antigravity (agy): verified headless CLI; single host identity.
-  - id: antigravity-worker
-    provider: antigravity
-    roles: [worker, reviewer]
-    model: gemini-3.8-flash-medium
-    max_concurrency: 1
-    daily_invocation_limit: 40
-    reserved_review_invocations: 5
-
-  # --- Codex: quota-constrained secondary worker / independent reviewer. Unverified until installed.
+  # --- Codex: scarce (5h + weekly). Independent second-opinion review for high-risk changes only.
   - id: codex-reviewer
     provider: codex
     roles: [reviewer]
-    codex_home: /var/lib/agentbridge/identities/codex
-    enabled: false
+    codex_home: /var/lib/agentbridge/.codex
+    profile: "SCARCE (5h + weekly). Independent second opinion ONLY for high-risk changes (boot path, stubs, memory maps, security-sensitive code)."
     max_concurrency: 1
-    daily_invocation_limit: 6
-    reserved_review_invocations: 6
+    rolling_limits: [{hours: 5, max: 4}, {hours: 168, max: 25}]
 
   # --- Optional official Gemini CLI (separately authenticated). Unverified until installed.
   - id: gemini-cli-worker

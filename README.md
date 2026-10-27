@@ -92,5 +92,6 @@ inside the package so they ship with `pip install`.
 - [Deployment on Ubuntu N100](docs/DEPLOYMENT.md): install, Docker, systemd, Tailscale, backup/restore
 - [Agent authentication](docs/AGENT_AUTH.md): separate Claude identities, Antigravity, Codex, Gemini, Mindlogic
 - [Provider capability matrix](docs/CAPABILITY_MATRIX.md): what was verified on a real host
+- [Work allocation across quota pools](docs/ALLOCATION.md): which agent does what, rolling limits
 - [Security policy](docs/SECURITY.md)
 - [Implemented vs unsupported](docs/STATUS.md)

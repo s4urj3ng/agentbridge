@@ -31,6 +31,8 @@ class MockAdapter(AgentAdapter):
             argv += ["--fail-mode", c["fail_mode"], "--fail-times", str(c.get("fail_times", 1))]
         if c.get("script"):
             argv += ["--script", str(c["script"])]
+        if req.model or c.get("model"):
+            argv += ["--model", req.model or c["model"]]
         if c.get("sleep"):
             argv += ["--sleep", str(c["sleep"])]
         env = self.base_env()

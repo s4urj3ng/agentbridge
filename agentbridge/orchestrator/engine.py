@@ -98,6 +98,8 @@ class Engine:
                                       "daily_invocation_limit=?, weekly_invocation_limit=?, "
                                       "reserved_review_invocations=?, config_json=?, updated_at=? WHERE id=?",
                                       (*vals, a["id"]))
+                    if a.get("enabled") is False:   # an explicit disable in config always wins
+                        self.conn.execute("UPDATE agents SET enabled=0 WHERE id=?", (a["id"],))
                 else:
                     self.conn.execute("INSERT INTO agents (provider, roles_json, max_concurrency, daily_invocation_limit,"
                                       " weekly_invocation_limit, reserved_review_invocations, config_json, updated_at,"
@@ -109,6 +111,15 @@ class Engine:
         if a is None:
             raise ValueError(f"unknown agent {agent_id}")
         return make_adapter(a["provider"], agent_id, jload(a["config_json"], {}))
+
+    def _config_problem(self, agent_id: str) -> str | None:
+        """Static adapter-config refusal (e.g. a model outside the allowed quota pool)."""
+        ad = self.adapter(agent_id)
+        check = getattr(ad, "model_allowed", None)
+        if check:
+            ok, why = check(ad.config.get("model"))
+            return None if ok else why
+        return None
 
     def detect_agents(self) -> dict[str, dict]:
         out = {}
@@ -386,13 +397,13 @@ class Engine:
 
     # ================================================================ execution core
     def _start_attempt(self, agent_id: str, purpose: str, *, task_id: int | None, event_id: int | None,
-                       prompt: str, cwd: Path, schema: dict, timeout_s: float) -> int:
+                       prompt: str, cwd: Path, schema: dict, timeout_s: float, model: str | None = None) -> int:
         ad = self.adapter(agent_id)
         nonce = uuid.uuid4().hex
         run_dir = self.s.artifacts_dir / "runs" / f"{time.strftime('%Y%m%d')}-{nonce[:12]}"
         run_dir.mkdir(parents=True, exist_ok=True)
         req = ExecRequest(purpose=purpose, prompt=prompt, cwd=cwd, run_dir=run_dir, timeout_s=timeout_s,
-                          output_schema=schema)
+                          output_schema=schema, model=model)
         inv = ad.prepare(req)
         if inv.stdin_prompt is not None:
             (run_dir / "prompt.txt").write_text(inv.stdin_prompt)
@@ -531,8 +542,11 @@ class Engine:
             previous_rejection=ev["error"] if ev["attempts"] > 1 else None)
         with tx(self.conn):
             self.conn.execute("UPDATE milestones SET tl_invocations=tl_invocations+1 WHERE id=?", (milestone["id"],))
+        lead_cfg = jload(row(self.conn, "SELECT config_json FROM agents WHERE id=?", lead)["config_json"], {})
+        model = (lead_cfg.get("event_models") or {}).get(ev["type"])   # e.g. strong model for planning only
         aid = self._start_attempt(lead, "tech_lead", task_id=None, event_id=ev["id"], prompt=prompt,
-                                  cwd=self.s.data_dir, schema=envelope_json_schema(), timeout_s=lim["tech_lead_timeout_s"])
+                                  cwd=self.s.data_dir, schema=envelope_json_schema(),
+                                  timeout_s=lim["tech_lead_timeout_s"], model=model)
         await self._finish_tl_attempt(ev, aid)
 
     async def _finish_tl_attempt(self, ev: sqlite3.Row, attempt_id: int) -> None:
@@ -581,12 +595,17 @@ class Engine:
                                        dedupe_key=f"tlfail:{ev['id']}")
             audit(self.conn, "engine", "tech_lead.rejected", project_id=project["id"], reason=reason[:500])
 
-    def _agent_roster(self, m: Manifest) -> dict[str, list[str]]:
-        enabled = {r["id"]: jload(r["roles_json"], []) for r in rows(self.conn, "SELECT id, roles_json FROM agents "
-                                                                              "WHERE enabled=1")}
-        workers = [a for a in dict.fromkeys([m.project.default_worker, *m.project.workers]) if "worker" in enabled.get(a, [])]
-        reviewers = [a for a in m.project.reviewers if "reviewer" in enabled.get(a, [])]
-        return {"workers": workers, "reviewers": reviewers}
+    def _agent_roster(self, m: Manifest) -> dict:
+        enabled = {r["id"]: r for r in rows(self.conn, "SELECT id, roles_json, config_json FROM agents WHERE enabled=1")}
+        roles = {k: jload(r["roles_json"], []) for k, r in enabled.items()}
+        workers = [a for a in dict.fromkeys([m.project.default_worker, *m.project.workers]) if "worker" in roles.get(a, [])]
+        reviewers = [a for a in m.project.reviewers if "reviewer" in roles.get(a, [])]
+        # owner-written cost/strength notes so the Tech Lead routes work to the right quota pool
+        profiles = {a: jload(enabled[a]["config_json"], {}).get("profile", "") for a in dict.fromkeys(workers + reviewers)}
+        out: dict = {"workers": workers, "reviewers": reviewers, "default_worker": m.project.default_worker}
+        if any(profiles.values()):
+            out["profiles"] = {k: v for k, v in profiles.items() if v}
+        return out
 
     # ---------------------------------------------------------------- decision application
     def apply_decisions(self, env: DecisionEnvelope, ev: sqlite3.Row, project: sqlite3.Row,
@@ -864,6 +883,14 @@ class Engine:
             ok, why = quota.admission(self.conn, t["assignee"], "work")
             if not ok:
                 continue  # this agent is unavailable; other agents' tasks still dispatch
+            problem = self._config_problem(t["assignee"])
+            if problem:
+                if self._safe_transition(t["id"], S.BLOCKED, problem, blocked_reason=problem):
+                    with tx(self.conn):
+                        evq.emit(self.conn, "TASK_BLOCKED", project_id=t["project_id"], milestone_id=t["milestone_id"],
+                                 task_id=t["id"], payload={"reason": f"{t['assignee']}: {problem}; reassign"},
+                                 dedupe_key=f"blocked:{t['id']}:config:{t['state_version']}")
+                continue
             m = self.manifest(t["project_id"])
             hits = hardware_no_go_hits(f"{t['title']}\n{t['description']}", m.policy.denied_categories())
             if hits:
@@ -892,6 +919,15 @@ class Engine:
                 continue
             ok, _ = quota.admission(self.conn, t["reviewer"], "review")
             if not ok:
+                continue
+            problem = self._config_problem(t["reviewer"])
+            if problem:
+                with tx(self.conn):
+                    self.conn.execute("UPDATE tasks SET reviewer=NULL WHERE id=?", (t["id"],))
+                    evq.emit(self.conn, "REVIEW_COMPLETED", project_id=t["project_id"], milestone_id=t["milestone_id"],
+                             task_id=t["id"], payload={"verdict": "unavailable", "reviewer": t["reviewer"],
+                                                       "issues": [problem]},
+                             dedupe_key=f"review:config:{t['id']}:{t['state_version']}:{t['reviewer']}")
                 continue
             busy = True
             self._spawn_job(key, self._run_review(t["id"]))

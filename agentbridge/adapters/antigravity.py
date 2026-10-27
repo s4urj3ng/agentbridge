@@ -17,10 +17,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..policies.safety import redact
+from ..policies.safety import PolicyViolation, redact
 from ..workers import process
 from .base import (MAX_ARG_PROMPT, AgentAdapter, AgentResult, AuthStatus, Capability, ExecRequest,
                    Invocation, classify_text)
+
+
+EXTERNAL_MODEL_PREFIXES = ("claude-", "gpt-oss")
 
 
 class AntigravityAdapter(AgentAdapter):
@@ -45,6 +48,10 @@ class AntigravityAdapter(AgentAdapter):
         cap.can_edit_files = "--mode" in text
         cap.verified = cap.available and cap.headless and cap.structured_output
         cap.notes.append("single host identity (no verified per-identity config dir)")
+        ok, why = self.model_allowed(self.config.get("model"))
+        if not ok:
+            cap.available = False
+            cap.notes.append(why)
         if not cap.headless:
             cap.notes.append("no headless --print mode detected: adapter must stay disabled")
         return cap
@@ -61,7 +68,21 @@ class AntigravityAdapter(AgentAdapter):
         return AuthStatus("not_logged_in" if outcome == "auth" else "unknown",
                           detail=redact((r.stderr or r.stdout)[-300:]))
 
+    def model_allowed(self, model: str | None) -> tuple[bool, str]:
+        """Third-party models inside Antigravity (Claude, GPT-OSS) have a separate, small quota.
+
+        They are refused unless the identity sets `allow_external_models: true`.
+        """
+        if not model:
+            return False, "no model configured: set `model` (e.g. gemini-3.8-flash-high) so the quota pool is explicit"
+        if not self.config.get("allow_external_models") and model.startswith(EXTERNAL_MODEL_PREFIXES):
+            return False, f"model {model!r} uses Antigravity's small external-model quota; set allow_external_models to use it"
+        return True, ""
+
     def prepare(self, req: ExecRequest) -> Invocation:
+        ok, why = self.model_allowed(req.model or self.config.get("model"))
+        if not ok:
+            raise PolicyViolation(why)
         exe = self.executable or self.executable_default
         prompt = req.prompt
         if len(prompt.encode()) > MAX_ARG_PROMPT:
