@@ -131,3 +131,9 @@ def test_claude_gateway_mode_env(monkeypatch, tmp_path):
     # a subscription identity never receives the gateway token
     assert "ANTHROPIC_AUTH_TOKEN" not in ClaudeAdapter("c", {}).prepare(
         ExecRequest("work", "p", tmp_path, tmp_path, 60, None)).env
+
+
+def test_placeholder_config_is_reported(monkeypatch):
+    monkeypatch.setenv("MINDLOGIC_API_KEY", KEY)
+    cap = MindlogicAdapter("ml", {"base_url": "https://REPLACE-WITH-MINDLOGIC-ENDPOINT/v1", "model": "REPLACE"}).detect()
+    assert not cap.available and "placeholder" in cap.notes[0]

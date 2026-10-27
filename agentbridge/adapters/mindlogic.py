@@ -57,6 +57,10 @@ class MindlogicAdapter(AgentAdapter):
                          roles_supported=["reviewer"], isolated_identity="n/a", headless=True,
                          structured_output=True, can_edit_files=False)
         model = self.config.get("model")
+        if "REPLACE" in self.base_url.upper() or "REPLACE" in str(model or "").upper():
+            cap.notes.append(f"base_url/model still the example placeholder ({self.base_url}); "
+                             f"use {DEFAULT_BASE_URL} and a model id from GET /models/")
+            return cap
         if not os.environ.get(self.key_env):
             cap.notes.append(f"{self.key_env} not set")
             return cap
@@ -66,7 +70,7 @@ class MindlogicAdapter(AgentAdapter):
         try:
             r = self._get("models")
         except httpx.HTTPError as e:
-            cap.notes.append(f"gateway unreachable: {redact(str(e))[:200]}")
+            cap.notes.append(f"gateway {self.base_url} unreachable: {redact(str(e))[:200]}")
             return cap
         if r.status_code != 200:
             cap.notes.append(f"GET /models/ → HTTP {r.status_code}")
