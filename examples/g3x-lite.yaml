@@ -15,19 +15,24 @@ project:
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
 
 validation:
-  # Offline suites only. Reviewed 2026-10-27 against origin/main 16b954a:
-  # - test_port7a/7b/7c, test_port8a, test_port9a: stdlib, no ROM, no compiler.
-  # - test_early_boot_literals, test_restart_sd_audit, test_validate_hdmi001: ROM tiers skip
-  #   cleanly when firmware/dumps/... is absent (it is never present on the AgentBridge host).
-  # EXCLUDED: test_validate_witness_inspector.py runs tools/build_witness_inspector.py and an ARM
-  # compiler, producing a camera payload binary (firmware/tools/witness_inspector_payload.bin).
-  # That is a deployable-binary operation under STRICT NO-GO, so `discover -s tests` is not used.
+  # Offline suites only. Reviewed 2026-10-27 against origin/main 16b954a and run on a clean clone
+  # on the N100.
+  # - bootstrap: tools/bootstrap_chdk_platform.py (PORT-8A) recreates the Git-ignored
+  #   chdk-port/platform/g3x sources from vendor/ (stdlib, no network/subprocess/compiler,
+  #   hash-checked). Every AgentBridge worktree is a fresh checkout without ignored files, so it
+  #   runs first each time. Its output is Git-ignored and never enters a commit.
+  # - test_port7a/7b/7c, test_port8a, test_port9a: stdlib, no ROM, no compiler (7a/7c need bootstrap).
+  # - test_early_boot_literals, test_validate_hdmi001: ROM tiers skip when firmware/dumps is absent.
+  # EXCLUDED: test_validate_witness_inspector.py (builds a camera payload binary with an ARM
+  # compiler: STRICT NO-GO) and test_restart_sd_audit.py (its tier-3 test depends on the
+  # local-only tools/build_prototype.py and fails on any clean clone; its ROM tiers skip anyway).
   commands:
+    bootstrap: ["python3", "-B", "tools/bootstrap_chdk_platform.py"]
     port_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port*.py"]
-    audit_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_[er]*.py"]
+    audit_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_early*.py"]
     hdmi_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_validate_hdmi*.py"]
     port9_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port9*.py", "-v"]
-  default: [port_tests, audit_tests, hdmi_tests]
+  default: [bootstrap, port_tests, audit_tests, hdmi_tests]
   timeout_s: 900
 
 policy:
@@ -60,6 +65,7 @@ charter: |
 context:
   - "Hardware policy is STRICT NO-GO: no flashing, camera operations, SD-card writing, boot changes, deployment or hardware trials."
   - "Never run tests/test_validate_witness_inspector.py or tools/build_witness_inspector.py: they build a camera payload binary."
+  - "chdk-port/platform/g3x is Git-ignored; AgentBridge recreates it in every worktree with tools/bootstrap_chdk_platform.py before tests. Never edit those generated files."
   - "PORT-9A delivered tools/port9a_runtime_lifecycle.py (stdlib state model), 32 tests and docs/PORT9A_RUNTIME_INTEGRATION_MAP.md: interfaces I1-I4 modelled, all GM1.10C preconditions False, unknowns U1-U7."
   - "docs/PROJECT_STATE.md and docs/HANDOFF.md were last updated for PORT-5E; PORT-7B..9A are recorded in git history and their own docs."
   - "Candidate next milestone: PORT-9B — offline runtime integration contracts. Do not start without owner approval."
