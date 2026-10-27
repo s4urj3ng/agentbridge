@@ -40,13 +40,13 @@ MAIN_MENU = [[{"text": "📊 Quota", "callback_data": "quota"}, {"text": "📁 D
 
 
 def _stop_text(reason: str) -> str:
-    """'provider window seven_day at 95% (stop at 85%) until …' → 'tuần đã dùng 95% (ngưỡng 85%)'."""
+    """'provider window seven_day at 95% (stop at 85%) until …' → 'tuần đã dùng 95%'."""
     import re
     m = re.search(r"provider window (\w+) (?:at ([\d.]+)% \(stop at ([\d.]+)%\)|exhausted)", reason or "")
     if not m:
         return reason or ""
     name = {"five_hour": "5h", "seven_day": "tuần"}.get(m.group(1), m.group(1))
-    return f"{name} đã hết" if m.group(2) is None else f"{name} đã dùng {m.group(2)}% (ngưỡng {m.group(3)}%)"
+    return f"{name} đã hết" if m.group(2) is None else f"{name} đã dùng {m.group(2)}%"
 
 
 def bar(pct: int, width: int = 10) -> str:
@@ -126,8 +126,7 @@ class TelegramBot:
 
     def quota_text(self) -> tuple[str, list]:
         self.refresh_quota()
-        lines = ["<b>📊 Quota</b>", "<i>✅ số thật nhà cung cấp báo · 📐 ngân sách bạn đặt · "
-                                   "🟡 vượt ngưỡng, việc chuyển sang agent dự phòng</i>", ""]
+        lines = ["<b>📊 Quota</b>", "<i>✅ số thật nhà cung cấp báo · 🟡 đang nhường việc cho agent dự phòng</i>", ""]
         buttons = []
         for a in quota_report(self.conn):
             icon = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🟠", "paused": "⏸", "provider_stop": "🟡"}[a["state"]]
@@ -155,10 +154,8 @@ class TelegramBot:
                     lines.append(f"   ✅ {w['label']:>3} {w['status']} · reset {self.t(w['resets_at'])}")
             if a["provider_windows"]:
                 lines.append(f"      <i>đo lúc {self.t(a['provider_quota_at'])}</i>")
-            for w in a["windows"]:
-                lines.append(f"   📐 {w['label']:>3} {bar(w['left_pct'])} {w['left_pct']}% ({w['used']}/{w['max']})")
-            if not a["windows"] and not a["provider_windows"]:
-                lines.append(f"   không có số liệu quota · 7 ngày: {a['calls_7d']} lượt")
+            if not a["provider_windows"]:
+                lines.append(f"   chưa có số liệu quota · 7 ngày: {a['calls_7d']} lượt")
             buttons.append({"text": a["id"], "callback_data": f"agent:{a['id']}"[:64]})
         kb = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
         return "\n".join(lines), kb
@@ -173,8 +170,7 @@ class TelegramBot:
         for w in a["provider_windows"]:
             lines.append(f"✅ {a['provider_source']}: {w['label']} đã dùng {w['used_pct']}% "
                          f"({w['status']}), reset {self.t(w['resets_at'])}" + (" — đã qua, chưa đo lại" if w["stale"] else ""))
-        for w in a["windows"]:
-            lines.append(f"📐 ngân sách {w['label']}: dùng {w['used']}/{w['max']} → còn {w['left_pct']}%")
+
         if a["last_limit_error"]:
             lines.append(f"Lần cuối nhà cung cấp báo giới hạn: {self.t(a['last_limit_error']['started_at'])} "
                          f"({a['last_limit_error']['outcome']})")

@@ -12,7 +12,7 @@ Check quota and progress, and get notified, without touching the server.
     writes after each run. A window whose
     reset time has passed is shown as "đã reset (chưa đo lại)" (reset, not measured since), not
     as a stale number. `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
-  - 📐 % left of the budget **you** configured (`rolling_limits`), as an extra safety net.
+  - Owner budgets (`rolling_limits`) still apply as a safety net but are not shown in the bot.
   - state: 🔴 cooldown (until the provider's reset time), 🟠 circuit open, ⏸ paused.
   Tap an agent for details.
 - **Notifications** (configurable via `telegram.notify`): milestone completed, task completed,

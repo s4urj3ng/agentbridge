@@ -74,9 +74,8 @@ def test_status_quota_and_progress(setup):
     status = fake.sent()[0]["text"]
     assert "Synthetic calc demo" in status and "engine" in status
     quota_view = fake.sent("editMessageText")[0]["text"]
-    used = quota.window_count(e.conn, "mock-worker", 5)
-    assert f"({used}/10)" in quota_view and "ngân sách" in quota_view   # budget, not invented provider quota
-    assert "5h" in fake.sent("editMessageText")[1]["text"]
+    assert "mock-worker" in quota_view and "chưa có số liệu quota" in quota_view   # nothing invented
+    assert "mock-worker" in fake.sent("editMessageText")[1]["text"]
     assert all("SECRET" not in json.dumps(b) for _, b in fake.calls)
 
 

@@ -165,4 +165,5 @@ def test_telegram_marks_agent_past_stop_level(settings):
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": True}))))
     text, _ = bot.quota_text()
     assert "🟡 <b>claude-pro</b>" in text
-    assert "đang nhường việc: tuần đã dùng 95% (ngưỡng 85%) → antigravity-argon" in text
+    assert "đang nhường việc: tuần đã dùng 95% → antigravity-argon" in text
+    assert "ngưỡng" not in text and "📐" not in text
