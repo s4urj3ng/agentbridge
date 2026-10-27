@@ -179,6 +179,25 @@ def cmd_serve(args):
     uvicorn.run(create_app(s), host=args.host or s.bind_host, port=args.port or s.port, log_level="info")
 
 
+def cmd_telegram(args):
+    from .integrations.telegram import TelegramBot
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)   # its INFO lines would include the bot token URL
+    s = load_settings(args.config, args.data_dir)
+    s.ensure_dirs()
+    migrate(connect(s.db_path))
+    bot = TelegramBot(s)
+    if args.discover:
+        found = bot.discover()
+        _print(found or "no messages yet: send /start to the bot from Telegram, then run this again")
+        return
+    if args.test:
+        bot.broadcast("✅ AgentBridge Telegram bot hoạt động. Gõ /status hoặc /quota.")
+        print(f"test message sent to {len(bot.allowed)} chat(s)")
+        return
+    bot.run_forever()
+
+
 def cmd_backup(args):
     s = load_settings(args.config, args.data_dir)
     src = connect(s.db_path)
@@ -259,6 +278,10 @@ def main(argv: list[str] | None = None) -> None:
     x = sub.add_parser("serve", help="API + dashboard (control plane)")
     x.add_argument("--host"); x.add_argument("--port", type=int); x.add_argument("--dev", action="store_true")
     x.set_defaults(fn=cmd_serve)
+    x = sub.add_parser("telegram", help="Telegram bot: quota/progress buttons and notifications")
+    x.add_argument("--discover", action="store_true", help="list chat ids that messaged the bot")
+    x.add_argument("--test", action="store_true", help="send a test message to the allowed chats")
+    x.set_defaults(fn=cmd_telegram)
     x = sub.add_parser("backup"); x.add_argument("dest"); x.set_defaults(fn=cmd_backup)
     x = sub.add_parser("restore"); x.add_argument("src"); x.add_argument("--force", action="store_true")
     x.set_defaults(fn=cmd_restore)

@@ -45,6 +45,7 @@ class Settings:
     limits: Limits = field(default_factory=Limits)
     agents: list[dict[str, Any]] = field(default_factory=list)
     github: dict[str, Any] = field(default_factory=dict)
+    telegram: dict[str, Any] = field(default_factory=dict)
     # global hard allowlist of executables usable in validation commands
     validation_executables: list[str] = field(default_factory=lambda: [
         "python", "python3", "pytest", "make", "npm", "node", "cargo", "go",
@@ -142,6 +143,7 @@ def load_settings(config_file: str | os.PathLike | None = None,
     s.poll_interval_s = float(raw.get("poll_interval_s", s.poll_interval_s))
     s.agents = raw.get("agents") or list(DEFAULT_AGENTS)
     s.github = raw.get("github") or {}
+    s.telegram = raw.get("telegram") or {}
     if raw.get("validation_executables"):
         s.validation_executables = list(raw["validation_executables"])
     if raw.get("protected_branches"):

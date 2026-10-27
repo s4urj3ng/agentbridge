@@ -1,0 +1,24 @@
+[Unit]
+Description=AgentBridge Telegram bot (outbound long polling; no open port)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentbridge
+Group=agentbridge
+EnvironmentFile=/etc/agentbridge/agentbridge.env
+Environment=AGENTBRIDGE_CONFIG=/etc/agentbridge/agentbridge.yaml
+Environment=AGENTBRIDGE_DATA_DIR=/var/lib/agentbridge
+WorkingDirectory=/var/lib/agentbridge
+ExecStart=/opt/agentbridge/.venv/bin/agentbridge telegram
+Restart=always
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agentbridge
+
+[Install]
+WantedBy=multi-user.target

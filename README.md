@@ -64,6 +64,7 @@ AGENTBRIDGE_ADMIN_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe
 | `approvals list/approve/reject <id>` | human approvals |
 | `backup <file>`, `restore <file> --force`, `recover` | operations |
 | `demo` | synthetic end-to-end demo with mock agents |
+| `telegram [--discover|--test]` | Telegram bot (quota, progress, notifications) |
 
 ## Layout
 
@@ -93,5 +94,6 @@ inside the package so they ship with `pip install`.
 - [Agent authentication](docs/AGENT_AUTH.md): separate Claude identities, Antigravity, Codex, Gemini, Mindlogic
 - [Provider capability matrix](docs/CAPABILITY_MATRIX.md): what was verified on a real host
 - [Work allocation across quota pools](docs/ALLOCATION.md): which agent does what, rolling limits
+- [Telegram bot](docs/TELEGRAM.md): quota/progress buttons and notifications
 - [Security policy](docs/SECURITY.md)
 - [Implemented vs unsupported](docs/STATUS.md)

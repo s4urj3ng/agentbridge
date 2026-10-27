@@ -49,6 +49,9 @@ systemctl daemon-reload
 sudo -u agentbridge env AGENTBRIDGE_CONFIG="$CONF/agentbridge.yaml" AGENTBRIDGE_DATA_DIR="$DATA" \
   "$PREFIX/.venv/bin/agentbridge" init
 systemctl enable --now agentbridge-engine.service agentbridge-backup.timer
+if grep -q '^TELEGRAM_BOT_TOKEN=.' "$CONF/agentbridge.env" && systemctl is-enabled agentbridge-telegram >/dev/null 2>&1; then
+  systemctl restart agentbridge-telegram
+fi
 echo
 echo "Engine installed. Control plane: either"
 echo "  sudo systemctl enable --now agentbridge-api      (host)   or"

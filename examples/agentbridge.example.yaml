@@ -23,6 +23,15 @@ github:
   enabled: false                    # set true after `gh auth login` as the agentbridge user
   gh_executable: gh
 
+telegram:
+  # Bot token: TELEGRAM_BOT_TOKEN in agentbridge.env. Find your chat id with
+  # `agentbridge telegram --discover` after sending /start to the bot.
+  allowed_chat_ids: []               # e.g. [123456789]
+  allow_approvals: false             # true = approve/reject buttons in Telegram
+  timezone: Asia/Ho_Chi_Minh
+  # notify: [milestone_completed, task_blocked, task_completed, approval_requested, agent_cooldown,
+  #          agent_auth, agent_circuit, fallback, engine_down, engine_error, draft_pr]
+
 agents:
   # Work allocation (docs/ALLOCATION.md). rolling_limits are YOUR ceilings per provider window
   # (5 h / weekly), not the providers' real quotas; tune them after watching the Agents page.
