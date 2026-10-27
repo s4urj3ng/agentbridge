@@ -16,9 +16,9 @@
 
 ## Phase 2: multi-agent orchestration ✅ implemented and tested (mock)
 
-- Antigravity adapter (**verified** with real calls), Codex and Gemini CLI adapters (implemented
-  with flag detection; **unverified**: CLIs not installed), Mindlogic HTTP adapter (implemented,
-  disabled, **unverified**).
+- Antigravity adapter (**verified** with real calls), Codex adapter (**verified** by smoke test on
+  the N100, codex-cli 0.164.0), Gemini CLI adapter (implemented with flag detection;
+  **unverified**: CLI not installed), Mindlogic HTTP adapter (implemented, disabled, **unverified**).
 - Dependency scheduling, independent review routing (reviewer ≠ author, detached read-only
   worktree), review policy (`never` / `risk` paths / `always`).
 - Quota controls: per-agent concurrency, global concurrency, daily/weekly invocation ceilings,
