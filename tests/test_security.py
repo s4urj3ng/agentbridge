@@ -274,3 +274,20 @@ def test_redaction(monkeypatch):
                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz")
     for leak in ("supersecretvalue123", "ghp_abcdefghijkl", "sk-ant-abcdefgh", "abcdefghijklmnopqrstuvwxyz"):
         assert leak not in s
+
+
+def test_hardware_no_go_ignores_negated_and_analysis_mentions():
+    cats = ["firmware_flashing", "camera_operations", "sd_card_writing", "boot_manipulation",
+            "firmware_deployment", "hardware_trial"]
+    ok = ["Do not perform camera operations or SD-card writes; offline only.",
+          "STRICT NO-GO: no flashing, camera operations, SD-card writing or hardware trials.",
+          "Model the SD card mount readiness gate (InitFileModules) as an offline contract.",
+          "Document why SD1stInit must not write to the SD card before mount."]
+    for t in ok:
+        assert not hardware_no_go_hits(t, cats), t
+    bad = ["Flash the firmware to the camera", "Write the payload to the SD card",
+           "Format the SD card and make it bootable", "Run a hardware trial on the G3 X",
+           "Connect to the camera over PTP and run the test",
+           "Don't hesitate to flash the firmware once tests pass", "Never wait: write the image to the SD card now"]
+    for t in bad:
+        assert hardware_no_go_hits(t, cats), t

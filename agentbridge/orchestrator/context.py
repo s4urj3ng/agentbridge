@@ -108,7 +108,8 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
         sections.append("## Project context (trusted)\n" + "\n".join(trusted)[:5000])
     denied = manifest.get("denied_categories") or []
     if denied:
-        sections.append("## HARD NO-GO (cannot be overridden, tasks touching these are rejected)\n- " + "\n- ".join(denied))
+        sections.append("## HARD NO-GO (cannot be overridden, tasks touching these are rejected)\n- " + "\n- ".join(denied)
+                        + "\nAgentBridge enforces this itself; do not restate these prohibitions inside task text.")
     sections.append(f"## Milestone {milestone['key']} (id {mid}): {milestone['goal'][:3000]}")
     sections.append("## Tasks in milestone\n" + ("\n".join(
         f"- id={t['id']} key={t['key']} state={t['state']} assignee={t['assignee']} kind={t['kind']} "

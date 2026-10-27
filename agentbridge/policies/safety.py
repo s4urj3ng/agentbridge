@@ -110,19 +110,31 @@ def check_validation_command(name: str, manifest_cmds: dict[str, list[str]], all
 NO_GO_CATEGORIES: dict[str, list[str]] = {
     "firmware_flashing": [r"\bflash(ing|es|ed)?\b.*\bfirmware\b", r"\bfirmware\b.*\bflash", r"\bfirmware update\b", r"\bfi2\b", r"\.fir\b"],
     "camera_operations": [r"\bon[- ]camera\b", r"\bcamera (test|run|operation|trial)", r"\bptp\b", r"\bchdkptp\b", r"\bconnect(ing)? (to )?(the )?camera\b"],
-    "sd_card_writing": [r"\bsd[- ]?card\b", r"\bmake ?bootable\b", r"\bdd if=", r"\b/dev/(disk|sd|mmcblk)"],
+    "sd_card_writing": [r"\b(write|writing|format|formatting|wipe|copy|install|prepare)\b[^.\n]{0,30}\bsd[- ]?card",
+                        r"\bsd[- ]?card\b[^.\n]{0,20}\b(write|writing|format|bootable)",
+                        r"\bmake ?bootable\b", r"\bdd if=", r"\b/dev/(disk|sd|mmcblk)"],
     "boot_manipulation": [r"\bboot ?(sector|flag|loader|manipulat)", r"\bdiskboot\b", r"\bpsboot\b", r"\bbootloader\b"],
     "firmware_deployment": [r"\bdeploy(ing|ment)?\b.*\b(firmware|camera|device)\b"],
     "hardware_trial": [r"\bhardware (trial|test|run|execution)\b", r"\bon[- ]device\b", r"\breal hardware\b"],
 }
 
 
+_NEGATION = re.compile(r"\b(no|not|never|without|avoid|forbid|forbidden|prohibit|prohibited|must not|do not|don't|"
+                       r"does not|no-go|nogo|excluding|exclude|instead of)\b(?![^.;\n]*\b(hesitate|forget|fail|wait|"
+                       r"delay|stop|hold back)\b)[^.;\n]{0,40}$")
+
+
 def hardware_no_go_hits(text: str, denied_categories: Iterable[str]) -> list[str]:
+    """Categories whose patterns occur in `text`, ignoring negated mentions.
+
+    "Do not perform camera operations" or "STRICT NO-GO: no flashing" restate the policy and
+    must not block a task; "flash the firmware" must.
+    """
     t = text.lower()
     hits = []
     for cat in denied_categories:
         for pat in NO_GO_CATEGORIES.get(cat, []):
-            if re.search(pat, t):
+            if any(not _NEGATION.search(t[max(0, m.start() - 50):m.start()]) for m in re.finditer(pat, t)):
                 hits.append(cat)
                 break
     return hits

@@ -15,12 +15,19 @@ project:
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
 
 validation:
-  # The repository's own offline suite (stdlib unittest; documented in its test files as
-  # "no subprocess, ROM, binary, build or hardware access"). Verified layout on 2026-10-27.
+  # Offline suites only. Reviewed 2026-10-27 against origin/main 16b954a:
+  # - test_port7a/7b/7c, test_port8a, test_port9a: stdlib, no ROM, no compiler.
+  # - test_early_boot_literals, test_restart_sd_audit, test_validate_hdmi001: ROM tiers skip
+  #   cleanly when firmware/dumps/... is absent (it is never present on the AgentBridge host).
+  # EXCLUDED: test_validate_witness_inspector.py runs tools/build_witness_inspector.py and an ARM
+  # compiler, producing a camera payload binary (firmware/tools/witness_inspector_payload.bin).
+  # That is a deployable-binary operation under STRICT NO-GO, so `discover -s tests` is not used.
   commands:
-    offline_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    port_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port*.py"]
+    audit_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_[er]*.py"]
+    hdmi_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_validate_hdmi*.py"]
     port9_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port9*.py", "-v"]
-  default: [offline_tests]
+  default: [port_tests, audit_tests, hdmi_tests]
   timeout_s: 900
 
 policy:
@@ -28,8 +35,11 @@ policy:
   hardware_no_go: [firmware_flashing, camera_operations, sd_card_writing, boot_manipulation, firmware_deployment, hardware_trial]
   auto_start: false
   draft_pr: approval
+  # chdk-port/** is firmware-side source (boot_prototype.c, stubs): read-only for offline milestones.
+  # AGENTS.md is the owner's agent contract: agents never edit it. Relax only by owner decision.
   forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.FI2", "**/*.fi2", "**/*.fir",
-                    "**/*.rom", "**/DISKBOOT.BIN", "patches/**", "vendor/**", "**/*.pem", "**/.env"]
+                    "**/*.rom", "**/*.elf", "**/*.o", "**/DISKBOOT.BIN", "patches/**", "vendor/**",
+                    "chdk-port/**", "AGENTS.md", "**/*.pem", "**/.env"]
   protected_branches: [main, master, "release/*"]
   max_changed_files: 40
 
@@ -42,7 +52,15 @@ charter: |
   Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Work is strictly offline:
   source, build tooling, static analysis within the approved scope, and host-side tests.
   Restricted firmware analysis outside the approved scope is not allowed.
+  Repository rules: AGENTS.md and docs/SAFETY.md apply. Label every claim VERIFIED / INFERRED /
+  UNKNOWN with exact citations. Never infer firmware addresses, offsets or CPU mode without
+  evidence. ROM reads need explicit owner approval of an exact byte range and are impossible on
+  the AgentBridge host (no firmware/ files there). Local-only sources (untracked/Git-ignored L1/L2
+  in PORT-9A) are not available on the AgentBridge clone; do not cite them as checkable.
 context:
   - "Hardware policy is STRICT NO-GO: no flashing, camera operations, SD-card writing, boot changes, deployment or hardware trials."
+  - "Never run tests/test_validate_witness_inspector.py or tools/build_witness_inspector.py: they build a camera payload binary."
+  - "PORT-9A delivered tools/port9a_runtime_lifecycle.py (stdlib state model), 32 tests and docs/PORT9A_RUNTIME_INTEGRATION_MAP.md: interfaces I1-I4 modelled, all GM1.10C preconditions False, unknowns U1-U7."
+  - "docs/PROJECT_STATE.md and docs/HANDOFF.md were last updated for PORT-5E; PORT-7B..9A are recorded in git history and their own docs."
   - "Candidate next milestone: PORT-9B — offline runtime integration contracts. Do not start without owner approval."
 completed_milestones: [PORT-7B, PORT-7C, PORT-8A, PORT-9A]
