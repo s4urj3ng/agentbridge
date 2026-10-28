@@ -9,9 +9,9 @@ Security:
   * approve/reject buttons exist only when `telegram.allow_approvals: true`
     (default off), and still go through Engine.resolve_approval policy checks;
   * role assignment / routing order ("⚙️ Phân công") is read-only unless
-    `telegram.allow_config_changes: true` (default off); every change needs an inline
-    confirm, is validated (orchestrator/overrides.py), audited as telegram:<user id> and
-    announced to all allowed chats.
+    `telegram.allow_config_changes: true` (default off); each tap applies at once, is
+    validated (orchestrator/overrides.py), audited as telegram:<user id> and can be undone
+    (↩️ Hoàn tác) or dropped (♻️ Về gốc).
 Everything shown is redacted and summarised; no logs, diffs or prompts are sent.
 """
 from __future__ import annotations
@@ -45,11 +45,14 @@ MAIN_MENU = [[{"text": "📊 Quota", "callback_data": "quota"}, {"text": "📁 D
              [{"text": "🔄 Làm mới", "callback_data": "refresh"}]]
 
 # Vietnamese labels for the runtime override keys
-KEY_LABELS = {"default_worker": "worker mặc định", "workers": "thứ tự worker", "reviewers": "thứ tự reviewer",
+KEY_LABELS = {"default_worker": "worker mặc định", "workers": "thứ tự Code", "reviewers": "thứ tự Review",
               "fallback_to": "thứ tự dự phòng", "enabled": "bật/tắt", "max_concurrency": "số việc song song"}
-PROJECT_FIELDS = {"dw": "default_worker", "wk": "workers", "rv": "reviewers"}
-AGENT_FIELDS = {"fb": "fallback_to", "mc": "max_concurrency", "en": "enabled"}
 CFG_OFF = "Thay đổi phân công qua Telegram đang tắt."
+CFG_PREFIXES = {"cs:", "cl:", "ca:", "cu:", "cr:", "cg:"}
+STATE_ICONS = {"provider_stop": "🟡", "cooldown": "🔴", "circuit_open": "🔴", "paused": "⏸"}
+ACTION_LABELS = {"start_milestone": "Bắt đầu milestone", "create_draft_pr": "Tạo draft PR",
+                 "unblock_task": "Gỡ chặn task", "other": "Cần quyết định"}
+FULL_CHUNK = 3000   # raw characters per "📄 Xem đầy đủ" message (HTML escaping may grow it)
 
 
 def _stop_text(reason: str) -> str:
@@ -94,7 +97,6 @@ class TelegramBot:
         self.allowed = {int(x) for x in ids}
         self.allow_approvals = bool(cfg.get("allow_approvals", False))
         self.allow_config_changes = bool(cfg.get("allow_config_changes", False))
-        self.drafts: dict[int, dict] = {}    # chat id -> pending (unconfirmed) assignment change
         self.notify_kinds = set(cfg.get("notify") or DEFAULT_NOTIFY)
         self.tz = ZoneInfo(cfg.get("timezone", "Asia/Ho_Chi_Minh"))
         self.client = client or httpx.Client(timeout=40)
@@ -225,218 +227,264 @@ class TelegramBot:
             lines.append("")
         return "\n".join(lines), MAIN_MENU
 
+    # ------------------------------------------------------------ approvals
+    def _approval(self, aid: int) -> sqlite3.Row | None:
+        return row(self.conn, "SELECT a.*, p.slug, ms.key AS mkey, t.key AS tkey FROM approval_requests a "
+                              "JOIN projects p ON p.id=a.project_id LEFT JOIN milestones ms ON ms.id=a.milestone_id "
+                              "LEFT JOIN tasks t ON t.id=a.task_id WHERE a.id=?", aid)
+
+    def approval_card(self, a: sqlite3.Row) -> str:
+        """Compact card: action label, project · milestone · task, first line of the reason (≤160 chars)."""
+        where = " · ".join(esc(x) for x in (a["slug"], a["mkey"], a["tkey"]) if x)
+        lines = (a["reason"] or "").strip().splitlines()
+        first = lines[0].strip() if lines else ""
+        if len(first) > 160:
+            first = first[:159] + "…"
+        more = " …" if len(lines) > 1 and len(first) <= 160 and not first.endswith("…") else ""
+        return (f"📝 #{a['id']} <b>{ACTION_LABELS.get(a['action'], esc(a['action']))}</b> · {where}\n"
+                f"{esc(first)}{more}")
+
+    def approval_buttons(self, aid: int, *, in_list: bool = False) -> list:
+        # list buttons re-render the list; notification buttons (":n") edit that one message
+        sfx, tag = ("", f" #{aid}") if in_list else (":n", "")
+        kb = []
+        if self.allow_approvals:
+            kb.append([{"text": f"✅ Duyệt{tag}", "callback_data": f"ap:{aid}:approve{sfx}"},
+                       {"text": f"❌ Từ chối{tag}", "callback_data": f"ap:{aid}:reject{sfx}"}])
+        kb.append([{"text": f"📄 Xem đầy đủ{tag}", "callback_data": f"apf:{aid}"}])
+        return kb
+
+    def resolved_text(self, a: sqlite3.Row, user_id: int | None) -> str:
+        ok = a["status"] == "APPROVED"
+        who = "bạn" if a["resolved_by"] == f"telegram:{user_id}" else esc(a["resolved_by"] or "?")
+        head = f"{'✅ Đã duyệt' if ok else '❌ Đã từ chối'} #{a['id']} bởi {who} lúc {self.t(a['resolved_at'])}"
+        if a["status"] not in ("APPROVED", "REJECTED"):
+            head = f"#{a['id']}: {esc(a['status'])}"
+        return head + "\n" + self.approval_card(a)
+
     def approvals_text(self) -> tuple[str, list]:
-        aps = rows(self.conn, "SELECT a.*, p.slug FROM approval_requests a JOIN projects p ON p.id=a.project_id "
-                              "WHERE a.status='PENDING' ORDER BY a.id LIMIT 10")
+        aps = rows(self.conn, "SELECT id FROM approval_requests WHERE status='PENDING' ORDER BY id LIMIT 10")
         if not aps:
             return "Không có gì chờ duyệt. ✅", MAIN_MENU
         lines, kb = ["<b>📝 Chờ duyệt</b>"], []
-        for a in aps:
-            lines.append(f"\n#{a['id']} <b>{esc(a['action'])}</b> · {esc(a['slug'])} · {self.t(a['created_at'])}\n"
-                         f"{esc(a['reason'][:400])}")
-            if self.allow_approvals:
-                kb.append([{"text": f"✅ Duyệt #{a['id']}", "callback_data": f"ap:{a['id']}:approve"},
-                           {"text": f"❌ Từ chối #{a['id']}", "callback_data": f"ap:{a['id']}:reject"}])
+        for r in aps:
+            a = self._approval(r["id"])
+            lines.append("\n" + self.approval_card(a))
+            buttons = [b for row_ in self.approval_buttons(a["id"], in_list=True) for b in row_]
+            kb.append(buttons)
         if not self.allow_approvals:
             lines.append("\n<i>Duyệt bằng dashboard hoặc `agentbridge approvals approve ID` "
                          "(nút duyệt trên Telegram đang tắt).</i>")
         return "\n".join(lines), kb + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
 
+    def approval_full(self, aid: int) -> list[str]:
+        """Full reason plus evidence, split into messages under Telegram's limit."""
+        a = self._approval(aid)
+        if a is None:
+            return ["Không tìm thấy yêu cầu duyệt."]
+        body = f"Lý do:\n{a['reason'] or ''}"
+        ev = jload(a["evidence_json"], {})
+        if ev:
+            import json
+            body += "\n\nBằng chứng:\n" + json.dumps(ev, ensure_ascii=False, indent=1, default=str)
+        status = "" if a["status"] == "PENDING" else f" ({a['status']})"
+        chunks = [body[i:i + FULL_CHUNK] for i in range(0, len(body), FULL_CHUNK)] or [""]
+        out = []
+        for n, c in enumerate(chunks, 1):
+            head = self.approval_card(a).split("\n")[0] + status
+            if len(chunks) > 1:
+                head += f" · phần {n}/{len(chunks)}"
+            out.append(f"{head}\n\n{esc(c)}")
+        return out
+
+    def _approval_callback(self, data: str, chat_id: int, user_id: int | None,
+                           message_id: int) -> tuple[str, tuple[str, list] | None]:
+        """(callback answer, new content for the tapped message or None to leave it)."""
+        parts = data.split(":")
+        in_list = len(parts) < 4
+        try:
+            aid, action = int(parts[1]), parts[2]
+        except (IndexError, ValueError):
+            return "Nút không còn hợp lệ.", None
+        a = self._approval(aid)
+        if a is None:
+            return "Không tìm thấy yêu cầu duyệt.", (self.approvals_text() if in_list else None)
+        if a["status"] != "PENDING":
+            return "Đã xử lý rồi.", (self.approvals_text() if in_list else (self.resolved_text(a, user_id), []))
+        if not self.allow_approvals:
+            return "Duyệt qua Telegram đang tắt.", (self.approvals_text() if in_list else None)
+        from ..orchestrator.engine import Engine
+        try:
+            Engine(self.s, self.conn).resolve_approval(aid, action == "approve", f"telegram:{user_id}", "via Telegram")
+        except (ValueError, PolicyViolation) as e:
+            return f"Không thực hiện được: {e}", (self.approvals_text() if in_list else None)
+        reply = f"Đã {'duyệt' if action == 'approve' else 'từ chối'} #{aid}"
+        if in_list:
+            return reply, self.approvals_text()
+        return reply, (self.resolved_text(self._approval(aid), user_id), [])
+
     # ------------------------------------------------------------ assignment (⚙️ Phân công)
-    # callback_data uses list indices (cfg:p:<i>, cfg:a:<i>, cfg:d:<option i>) so it stays far below
-    # 64 bytes whatever the slugs and agent ids are; the pending change lives in self.drafts.
+    # One screen per project: an ordered CODE list and an ordered REVIEW list, each tap applied at
+    # once (gated by allow_config_changes, audited, ↩️ undo). callback_data uses list indices
+    # (cs:<project>, cl:<project>:<w|r>:<agent>:<u|d|x>, ...) so it stays far below 64 bytes.
     def _projects(self) -> list[str]:
         return [r["slug"] for r in rows(self.conn, "SELECT slug FROM projects ORDER BY id")]
 
-    def _agent_rows(self) -> list[sqlite3.Row]:
-        agents = rows(self.conn, "SELECT id, provider, roles_json, enabled, max_concurrency, config_json "
-                                 "FROM agents ORDER BY id")
-        if any(a["provider"] != "mock" for a in agents):   # same rule as the quota view: hide demo identities
-            agents = [a for a in agents if a["provider"] != "mock"]
-        return agents
+    def _agent_ids(self) -> list[str]:
+        return [r["id"] for r in rows(self.conn, "SELECT id FROM agents ORDER BY id")]
 
-    def assign_text(self, note: str = "") -> tuple[str, list]:
-        lines = ["<b>⚙️ Phân công</b>", "<i>✏️ = đang ghi đè cấu hình gốc (lưu trong DB)</i>", ""]
-        kb = []
-        for i, slug in enumerate(self._projects()):
-            p = overrides.effective_project(self.conn, slug)
-            mark = " ✏️" if p["overridden"] else ""
-            lines.append(f"📁 <b>{esc(slug)}</b>{mark} · lead {esc(p['tech_lead'])}")
-            lines.append(f"   👷 {esc(_fmt(list(dict.fromkeys([p['default_worker'], *p['workers']]))))}")
-            lines.append(f"   🔍 {esc(_fmt(p['reviewers']))}")
-            kb.append([{"text": f"📁 {slug}", "callback_data": f"cfg:p:{i}"}])
-        agent_ov = overrides.all_agent_overrides(self.conn)
-        buttons = []
-        for i, a in enumerate(self._agent_rows()):
-            mark = " ✏️" if a["id"] in agent_ov else ""
-            buttons.append({"text": ("" if a["enabled"] else "⏸ ") + a["id"] + mark, "callback_data": f"cfg:a:{i}"})
-        kb += [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-        if not self.allow_config_changes:
-            lines.append("\n<i>Chỉ xem. Bật `telegram.allow_config_changes: true` để đổi phân công từ Telegram.</i>")
-        if note:
-            lines.insert(1, note)
-        return "\n".join(lines), kb + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
+    def _state_icons(self) -> dict[str, str]:
+        icons = {a["id"]: STATE_ICONS.get(a["state"], "") for a in quota_report(self.conn)}
+        for r in rows(self.conn, "SELECT id FROM agents WHERE enabled=0"):
+            icons[r["id"]] = "⏸"
+        return icons
 
-    def project_cfg_text(self, i: int) -> tuple[str, list]:
-        slug = self._projects()[i]
+    def assign_text(self) -> tuple[str, list]:
+        projects = self._projects()
+        if len(projects) == 1:
+            return self.project_screen(0)
+        if not projects:
+            return "Chưa có dự án nào.", MAIN_MENU
+        kb = [[{"text": f"📁 {slug}", "callback_data": f"cs:{i}"}] for i, slug in enumerate(projects)]
+        return "<b>⚙️ Phân công</b>\nChọn dự án:", kb + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
+
+    def project_screen(self, pi: int) -> tuple[str, list]:
+        slug = self._projects()[pi]
         p = overrides.effective_project(self.conn, slug)
-        ov = set(p["overridden"])
-        m = lambda k: " ✏️" if k in ov else ""
-        lines = [f"<b>📁 {esc(slug)}</b> · Tech Lead {esc(p['tech_lead'])}",
-                 f"👷 Worker mặc định{m('default_worker')}: <b>{esc(p['default_worker'])}</b>",
-                 f"📋 Thứ tự worker{m('workers')}: {esc(_fmt(p['workers']))}",
-                 f"🔍 Thứ tự reviewer{m('reviewers')} (đầu tiên = ưu tiên): {esc(_fmt(p['reviewers']))}",
-                 "<i>Reviewer không bao giờ review task do chính mình làm.</i>"]
-        kb = []
-        if self.allow_config_changes:
-            kb += [[{"text": "👷 Worker mặc định", "callback_data": f"cfg:pe:{i}:dw"}],
-                   [{"text": "📋 Thứ tự worker", "callback_data": f"cfg:pe:{i}:wk"},
-                    {"text": "🔍 Thứ tự reviewer", "callback_data": f"cfg:pe:{i}:rv"}]]
-            if ov:
-                kb.append([{"text": "♻️ Về cấu hình gốc", "callback_data": f"cfg:pr:{i}"}])
-        return "\n".join(lines), kb + [[{"text": "⬅️ Phân công", "callback_data": "cfg"}]]
+        icons, ids = self._state_icons(), self._agent_ids()
+        edit = self.allow_config_changes
+        mark = " ✏️" if p["overridden"] else ""
+        lines = [f"<b>⚙️ Phân công · {esc(slug)}</b>{mark}", f"🧠 Tech Lead: {esc(p['tech_lead'])} (chỉ xem)"]
+        kb: list = []
+        for role, title in (("w", "🛠 CODE"), ("r", "🔍 REVIEW")):
+            lst = p["workers" if role == "w" else "reviewers"]
+            lines += ["", f"<b>{title}</b> (trên xuống = ưu tiên → dự phòng)"]
+            lines += [f" {n}. {esc(a)} {icons.get(a, '')}".rstrip() for n, a in enumerate(lst, 1)]
+            kb.append([{"text": f"— {title} —", "callback_data": "cn"}])
+            for n, a in enumerate(lst, 1):
+                ai = ids.index(a) if a in ids else -1
+                label = {"text": f"{n}. {a} {icons.get(a, '')}".rstrip(), "callback_data": f"cg:{pi}:{ai}"}
+                if edit:
+                    kb.append([label] + [{"text": t, "callback_data": f"cl:{pi}:{role}:{ai}:{op}"}
+                                         for t, op in (("⬆️", "u"), ("⬇️", "d"), ("➖", "x"))])
+                else:
+                    kb.append([label])
+            if edit:
+                kb.append([{"text": f"➕ Thêm vào {'Code' if role == 'w' else 'Review'}", "callback_data": f"ca:{pi}:{role}"}])
+        lines += ["", "<i>Review không bao giờ giao cho người viết task. Chạm tên agent để bật/tắt, đổi số việc song song.</i>"]
+        if not edit:
+            lines.append("<i>Chỉ xem. Bật `telegram.allow_config_changes: true` để đổi phân công từ Telegram.</i>")
+            return "\n".join(lines), kb + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
+        return "\n".join(lines), kb + [[{"text": "↩️ Hoàn tác", "callback_data": f"cu:{pi}"},
+                                        {"text": "♻️ Về gốc", "callback_data": f"cr:{pi}"},
+                                        {"text": "⬅️ Menu", "callback_data": "menu"}]]
 
-    def agent_cfg_text(self, i: int) -> tuple[str, list]:
-        a = self._agent_rows()[i]
-        ov = overrides.get(self.conn, "agent", a["id"])
+    def add_picker(self, pi: int, role: str) -> tuple[str, list] | None:
+        slug, ids = self._projects()[pi], self._agent_ids()
+        cur = overrides.effective_project(self.conn, slug)["workers" if role == "w" else "reviewers"]
+        opts = [a for a in overrides.eligible(self.conn, "worker" if role == "w" else "reviewer") if a not in cur]
+        if not opts:
+            return None
+        kb = [[{"text": f"➕ {a}", "callback_data": f"ca:{pi}:{role}:{ids.index(a)}"}] for a in opts]
+        return (f"<b>➕ Thêm vào {'Code' if role == 'w' else 'Review'}</b> · {esc(slug)}\nChạm để thêm vào cuối danh sách.",
+                kb + [[{"text": "⬅️ Quay lại", "callback_data": f"cs:{pi}"}]])
+
+    def agent_screen(self, pi: int, ai: int, picker: bool = False) -> tuple[str, list]:
+        aid = self._agent_ids()[ai]
+        a = row(self.conn, "SELECT * FROM agents WHERE id=?", aid)
+        ov = overrides.get(self.conn, "agent", aid)
         m = lambda k: " ✏️" if k in ov else ""
-        fb = overrides.fallback_chain(self.conn, a["id"], jload(a["config_json"], {}))
-        lines = [f"<b>{esc(a['id'])}</b> ({esc(a['provider'])}) · vai trò: {esc(', '.join(jload(a['roles_json'], [])))}",
+        rep = next((x for x in quota_report(self.conn) if x["id"] == aid), None)
+        state = ""
+        if rep and rep["state"] != "ok":
+            state = f"\nQuota: {STATE_ICONS.get(rep['state'], '')} {esc(_stop_text(rep['reason']) if rep['state'] == 'provider_stop' else rep['state'])}"
+        cfg = jload(a["config_json"], {})
+        lines = [f"<b>{esc(aid)}</b> ({esc(a['provider'])}, {esc(cfg.get('model') or '-')})",
+                 f"Vai trò: {esc(', '.join(jload(a['roles_json'], [])))}",
                  f"⏯ Trạng thái{m('enabled')}: {'🟢 bật' if a['enabled'] else '⏸ tắt'}",
-                 f"🔢 Số việc song song{m('max_concurrency')}: {a['max_concurrency']}",
-                 f"↪️ Thứ tự dự phòng{m('fallback_to')}: {esc(_fmt(fb))}"]
-        kb = []
-        if self.allow_config_changes:
-            kb += [[{"text": "↪️ Thứ tự dự phòng", "callback_data": f"cfg:ae:{i}:fb"},
-                    {"text": "🔢 Song song", "callback_data": f"cfg:ae:{i}:mc"}],
-                   [{"text": "⏸ Tắt agent" if a["enabled"] else "▶️ Bật agent", "callback_data": f"cfg:ae:{i}:en"}]]
-            if ov:
-                kb.append([{"text": "♻️ Về cấu hình gốc", "callback_data": f"cfg:ar:{i}"}])
-        return "\n".join(lines), kb + [[{"text": "⬅️ Phân công", "callback_data": "cfg"}]]
+                 f"🔢 Số việc song song{m('max_concurrency')}: {a['max_concurrency']}" + state]
+        back = [[{"text": "⬅️ Phân công", "callback_data": f"cs:{pi}"}]]
+        if not self.allow_config_changes:
+            return "\n".join(lines), back
+        if picker:
+            nums = [{"text": str(n), "callback_data": f"cg:{pi}:{ai}:mc:{n}"} for n in range(overrides.MAX_CONCURRENCY + 1)]
+            return ("\n".join(lines) + "\n\nChọn số việc song song:",
+                    [nums[:5], nums[5:], [{"text": "⬅️ Quay lại", "callback_data": f"cg:{pi}:{ai}"}]])
+        kb = [[{"text": "⏸ Tắt agent" if a["enabled"] else "▶️ Bật agent", "callback_data": f"cg:{pi}:{ai}:en"},
+               {"text": f"🔢 Song song: {a['max_concurrency']}", "callback_data": f"cg:{pi}:{ai}:mc"}]]
+        extra = []
+        if row(self.conn, "SELECT 1 FROM override_history WHERE scope='agent' AND target=?", aid):
+            extra.append({"text": "↩️ Hoàn tác", "callback_data": f"cg:{pi}:{ai}:un"})
+        if ov:
+            extra.append({"text": "♻️ Về gốc", "callback_data": f"cg:{pi}:{ai}:rs"})
+        return "\n".join(lines), kb + ([extra] if extra else []) + back
 
-    def _draft_back(self, d: dict) -> tuple[str, list]:
-        try:
-            if d["scope"] == "project":
-                return self.project_cfg_text(self._projects().index(d["target"]))
-            return self.agent_cfg_text([a["id"] for a in self._agent_rows()].index(d["target"]))
-        except ValueError:
-            return self.assign_text()
-
-    def _draft_text(self, d: dict) -> tuple[str, list]:
-        """Ordered pick list: tap agents in order of preference, then ✅ Xong."""
-        lines = [f"<b>{esc(d['target'])}</b> · {KEY_LABELS[d['key']]}",
-                 "Chạm lần lượt theo thứ tự ưu tiên (đầu tiên = ưu tiên nhất).", "",
-                 "Đã chọn: " + (esc(_fmt(d["value"])) if d["value"] else "<i>(chưa có)</i>")]
-        opts = [{"text": f"➕ {o}", "callback_data": f"cfg:d:{k}"} for k, o in enumerate(d["options"])
-                if o not in d["value"]]
-        kb = [opts[i:i + 2] for i in range(0, len(opts), 2)]
-        kb.append([{"text": "🧹 Chọn lại", "callback_data": "cfg:d:clr"}, {"text": "✅ Xong", "callback_data": "cfg:d:ok"}])
-        return "\n".join(lines), kb + [[{"text": "✖️ Huỷ", "callback_data": "cfg:n"}]]
-
-    def _choice_text(self, d: dict) -> tuple[str, list]:
-        """Single choice (worker mặc định, số việc song song): tapping one goes to the confirm step."""
-        lines = [f"<b>{esc(d['target'])}</b> · {KEY_LABELS[d['key']]}", f"Hiện tại: <b>{esc(_fmt(d['old']))}</b>",
-                 "Chọn giá trị mới:"]
-        opts = [{"text": str(o), "callback_data": f"cfg:d:{k}"} for k, o in enumerate(d["options"])]
-        width = 4 if d["key"] == "max_concurrency" else 2
-        kb = [opts[i:i + width] for i in range(0, len(opts), width)]
-        return "\n".join(lines), kb + [[{"text": "✖️ Huỷ", "callback_data": "cfg:n"}]]
-
-    def _confirm_text(self, d: dict) -> tuple[str, list]:
-        if d.get("reset"):
-            what = f"Đưa <b>{esc(d['target'])}</b> về cấu hình gốc (bỏ {esc(', '.join(KEY_LABELS[k] for k in d['keys']))})?"
-        else:
-            what = (f"<b>{esc(d['target'])}</b> · {KEY_LABELS[d['key']]}\n"
-                    f"{esc(_fmt(d['old']))} → <b>{esc(_fmt(d['value']))}</b>")
-        text = ("<b>Xác nhận thay đổi?</b>\n" + what +
-                "\n\n<i>Áp dụng cho các lần giao việc tiếp theo; việc đang chạy không bị dừng. "
-                "Thay đổi được ghi audit và báo cho mọi chat được phép.</i>")
-        return text, [[{"text": "✅ Xác nhận", "callback_data": "cfg:y"}, {"text": "✖️ Huỷ", "callback_data": "cfg:n"}]]
-
-    def _start_draft(self, chat_id: int, scope: str, idx: int, field: str) -> tuple[str, tuple[str, list]]:
-        if scope == "project":
-            slug, key = self._projects()[idx], PROJECT_FIELDS[field]
-            p = overrides.effective_project(self.conn, slug)
-            role = "reviewer" if key == "reviewers" else "worker"
-            d = {"scope": "project", "target": slug, "key": key, "old": p[key],
-                 "options": overrides.eligible(self.conn, role), "value": [] if key != "default_worker" else None}
-        else:
-            a = self._agent_rows()[idx]
-            key = AGENT_FIELDS[field]
-            if key == "enabled":
-                d = {"scope": "agent", "target": a["id"], "key": key, "old": bool(a["enabled"]),
-                     "value": not a["enabled"], "options": []}
-                self.drafts[chat_id] = d
-                return "", self._confirm_text(d)
-            if key == "max_concurrency":
-                d = {"scope": "agent", "target": a["id"], "key": key, "old": a["max_concurrency"],
-                     "options": list(range(overrides.MAX_CONCURRENCY + 1)), "value": None}
-            else:
-                roles = set(jload(a["roles_json"], []))
-                opts = [x["id"] for x in rows(self.conn, "SELECT id, roles_json FROM agents ORDER BY id")
-                        if x["id"] != a["id"] and roles & set(jload(x["roles_json"], []))]
-                d = {"scope": "agent", "target": a["id"], "key": key, "value": [], "options": opts,
-                     "old": overrides.fallback_chain(self.conn, a["id"], jload(a["config_json"], {}))}
-        self.drafts[chat_id] = d
-        return "", (self._draft_text(d) if isinstance(d["value"], list) else self._choice_text(d))
-
-    def _config_action(self, data: str, chat_id: int, user_id: int | None) -> tuple[str, tuple[str, list]]:
-        """(callback answer, new view) for every cfg… button."""
-        parts = data.split(":")
+    def _config_action(self, data: str, user_id: int | None) -> tuple[str, tuple[str, list] | None]:
+        """(callback answer, new view or None) for every ⚙️ button."""
+        p = data.split(":")
+        actor = f"telegram:{user_id}"
         try:
             if data == "cfg":
                 return "", self.assign_text()
-            if parts[1] == "p":
-                return "", self.project_cfg_text(int(parts[2]))
-            if parts[1] == "a":
-                return "", self.agent_cfg_text(int(parts[2]))
+            if p[0] == "cn":
+                return "", None
+            pi = int(p[1])
+            slug = self._projects()[pi]
+            if p[0] == "cs":
+                return "", self.project_screen(pi)
+            if p[0] == "cg" and len(p) == 3:
+                return "", self.agent_screen(pi, int(p[2]))
             # everything below changes standing configuration
             if not self.allow_config_changes:
-                self.drafts.pop(chat_id, None)
-                return CFG_OFF, self.assign_text()
-            if parts[1] in ("pe", "ae"):
-                return self._start_draft(chat_id, "project" if parts[1] == "pe" else "agent", int(parts[2]), parts[3])
-            if parts[1] in ("pr", "ar"):
-                scope = "project" if parts[1] == "pr" else "agent"
-                target = self._projects()[int(parts[2])] if scope == "project" else self._agent_rows()[int(parts[2])]["id"]
-                d = {"scope": scope, "target": target, "reset": True,
-                     "keys": sorted(overrides.get(self.conn, scope, target))}
-                self.drafts[chat_id] = d
-                return "", self._confirm_text(d)
-            d = self.drafts.get(chat_id)
-            if d is None:
-                return "Phiên chỉnh đã hết, mở lại.", self.assign_text()
-            if parts[1] == "n":
-                self.drafts.pop(chat_id, None)
-                return "Đã huỷ.", self._draft_back(d)
-            if parts[1] == "d" and not d.get("reset"):
-                if parts[2] == "clr":
-                    d["value"] = []
-                    return "", self._draft_text(d)
-                if parts[2] == "ok":
-                    return "", self._confirm_text(d)
-                choice = d["options"][int(parts[2])]
-                if isinstance(d["value"], list):
-                    if choice not in d["value"]:
-                        d["value"].append(choice)
-                    return "", self._draft_text(d)
-                d["value"] = choice
-                return "", self._confirm_text(d)
-            if parts[1] == "y":
-                self.drafts.pop(chat_id, None)
-                actor = f"telegram:{user_id}"
-                if d.get("reset"):
-                    overrides.reset(self.conn, d["scope"], d["target"], actor, self.s.agents)
-                    return "Đã về cấu hình gốc.", self._draft_back(d)
-                try:
-                    overrides.set_override(self.conn, d["scope"], d["target"], d["key"], d["value"], actor)
-                except ValueError as e:
-                    return f"Không lưu: {e}", self._draft_back(d)
-                return "Đã lưu.", self._draft_back(d)
-        except (IndexError, KeyError, ValueError):   # stale or forged button
-            self.drafts.pop(chat_id, None)
+                return CFG_OFF, self.project_screen(pi)
+            if p[0] == "cl":
+                role, agent, op = p[2], self._agent_ids()[int(p[3])], {"u": "up", "d": "down", "x": "remove"}[p[4]]
+                cur = overrides.effective_project(self.conn, slug)["workers" if role == "w" else "reviewers"]
+                if op == "remove" and cur == [agent]:
+                    return "Không thể bỏ agent cuối cùng của vai trò này.", None
+                if (op == "up" and cur[:1] == [agent]) or (op == "down" and cur[-1:] == [agent]):
+                    return "", None
+                overrides.edit_list(self.conn, slug, "worker" if role == "w" else "reviewer", op, agent, actor)
+                return "Đã lưu.", self.project_screen(pi)
+            if p[0] == "ca":
+                role = p[2]
+                if len(p) == 3:
+                    picker = self.add_picker(pi, role)
+                    return ("Không còn agent phù hợp để thêm.", None) if picker is None else ("", picker)
+                overrides.edit_list(self.conn, slug, "worker" if role == "w" else "reviewer", "add",
+                                    self._agent_ids()[int(p[3])], actor)
+                return "Đã thêm.", self.project_screen(pi)
+            if p[0] == "cu":
+                done = overrides.undo(self.conn, "project", slug, actor)
+                return ("Đã hoàn tác." if done else "Không còn gì để hoàn tác."), self.project_screen(pi)
+            if p[0] == "cr":
+                keys = overrides.reset(self.conn, "project", slug, actor)
+                return ("Đã về cấu hình gốc." if keys else "Đang dùng cấu hình gốc."), self.project_screen(pi)
+            if p[0] == "cg":
+                ai = int(p[2])
+                aid = self._agent_ids()[ai]
+                if p[3] == "en":
+                    on = not row(self.conn, "SELECT enabled FROM agents WHERE id=?", aid)["enabled"]
+                    overrides.set_override(self.conn, "agent", aid, "enabled", on, actor)
+                    return ("Đã bật." if on else "Đã tắt."), self.agent_screen(pi, ai)
+                if p[3] == "mc" and len(p) == 4:
+                    return "", self.agent_screen(pi, ai, picker=True)
+                if p[3] == "mc":
+                    overrides.set_override(self.conn, "agent", aid, "max_concurrency", int(p[4]), actor)
+                    return "Đã lưu.", self.agent_screen(pi, ai)
+                if p[3] == "un":
+                    done = overrides.undo(self.conn, "agent", aid, actor, self.s.agents)
+                    return ("Đã hoàn tác." if done else "Không còn gì để hoàn tác."), self.agent_screen(pi, ai)
+                if p[3] == "rs":
+                    overrides.reset(self.conn, "agent", aid, actor, self.s.agents)
+                    return "Đã về cấu hình gốc.", self.agent_screen(pi, ai)
+        except ValueError as e:
+            if str(e).startswith("invalid literal"):
+                return "Nút không còn hợp lệ, mở lại.", self.assign_text()
+            return f"Không lưu: {e}"[:190], None
+        except (IndexError, KeyError):   # stale or forged button
             return "Nút không còn hợp lệ, mở lại.", self.assign_text()
-        return "", self.assign_text()
+        return "Nút không còn hợp lệ, mở lại.", self.assign_text()
 
     # ------------------------------------------------------------ updates
     def handle_update(self, u: dict) -> None:
@@ -459,38 +507,39 @@ class TelegramBot:
             return
         data = cq.get("data", "")
         user = cq.get("from", {}).get("id")
+        message_id = cq["message"]["message_id"]
         try:
+            view: tuple[str, list] | None
+            if data.startswith("apf:"):
+                self.api("answerCallbackQuery", callback_query_id=cq["id"])
+                try:
+                    texts = self.approval_full(int(data[4:]))
+                except ValueError:
+                    texts = ["Nút không còn hợp lệ."]
+                for t in texts:
+                    self.send(chat_id, t)
+                return
             if data.startswith("ap:"):
-                reply = self._approval_action(data, user)
+                reply, view = self._approval_callback(data, chat_id, user, message_id)
                 self.api("answerCallbackQuery", callback_query_id=cq["id"], text=reply[:190])
-                text, kb = self.approvals_text()
-            elif data == "cfg" or data.startswith("cfg:"):
-                reply, (text, kb) = self._config_action(data, chat_id, user)
+            elif data == "cfg" or data[:3] in CFG_PREFIXES or data == "cn":
+                reply, view = self._config_action(data, user)
                 self.api("answerCallbackQuery", callback_query_id=cq["id"], **({"text": reply[:190]} if reply else {}))
             else:
                 self.api("answerCallbackQuery", callback_query_id=cq["id"])
                 if data.startswith("agent:"):
-                    text, kb = self.agent_text(data[6:])
+                    view = self.agent_text(data[6:])
                 else:
-                    text, kb = {"quota": self.quota_text, "overview": self.overview_text, "refresh": self.overview_text,
-                                "approvals": self.approvals_text}.get(data, lambda: ("Chọn mục:", MAIN_MENU))()
-            self.api("editMessageText", chat_id=chat_id, message_id=cq["message"]["message_id"], text=text[:MAX_LEN],
+                    view = {"quota": self.quota_text, "overview": self.overview_text, "refresh": self.overview_text,
+                            "approvals": self.approvals_text}.get(data, lambda: ("Chọn mục:", MAIN_MENU))()
+            if view is None:
+                return
+            text, kb = view
+            self.api("editMessageText", chat_id=chat_id, message_id=message_id, text=text[:MAX_LEN],
                      parse_mode="HTML", disable_web_page_preview=True, reply_markup={"inline_keyboard": kb})
         except RuntimeError as e:
             if "message is not modified" not in str(e):
                 raise
-
-    def _approval_action(self, data: str, user_id: int | None) -> str:
-        if not self.allow_approvals:
-            return "Duyệt qua Telegram đang tắt."
-        _, aid, action = data.split(":")
-        from ..orchestrator.engine import Engine
-        try:
-            Engine(self.s, self.conn).resolve_approval(int(aid), action == "approve", f"telegram:{user_id}",
-                                                       "via Telegram")
-        except (ValueError, PolicyViolation) as e:
-            return f"Không thực hiện được: {e}"
-        return f"Đã {'duyệt' if action == 'approve' else 'từ chối'} #{aid}"
 
     # ------------------------------------------------------------ notifications
     def _cursor(self, key: str, table: str) -> int:
@@ -519,13 +568,11 @@ class TelegramBot:
             self._set_cursor("telegram.audit_cursor", last)
         cur = self._cursor("telegram.approval_cursor", "approval_requests")
         last = cur
-        for a in rows(self.conn, "SELECT a.*, p.slug FROM approval_requests a JOIN projects p ON p.id=a.project_id "
-                                 "WHERE a.id > ? ORDER BY a.id", cur):
-            last = a["id"]
-            if "approval_requested" in self.notify_kinds and a["status"] == "PENDING":
-                kb = [[{"text": "📝 Xem chờ duyệt", "callback_data": "approvals"}]]
-                out.append((f"📝 <b>Cần bạn duyệt</b> #{a['id']} ({esc(a['action'])}) · {esc(a['slug'])}\n"
-                            f"{esc(a['reason'][:500])}", kb))
+        for r in rows(self.conn, "SELECT id, status FROM approval_requests WHERE id > ? ORDER BY id", cur):
+            last = r["id"]
+            if "approval_requested" in self.notify_kinds and r["status"] == "PENDING":
+                out.append(("<b>Cần bạn duyệt</b>\n" + self.approval_card(self._approval(r["id"])),
+                            self.approval_buttons(r["id"])))
         if last != cur:
             self._set_cursor("telegram.approval_cursor", last)
         up = engine_running(self.s.data_dir)
@@ -565,6 +612,10 @@ class TelegramBot:
             what = "Task" if act == "task.reroute" else "Review"
             return (f"↪️ {what} {esc(self._task_key(e['task_id']))} theo phân công mới: "
                     f"{esc(d.get('src'))} → {esc(d.get('dst'))}")
+        if act.startswith("config.") and str(e["actor"]).startswith("telegram:"):
+            return None   # the tapping chat already sees the edited ⚙️ screen; every change is in the audit log
+        if act == "config.undo" and "config_change" in k:
+            return f"↩️ Hoàn tác phân công ({esc(e['actor'])}): {esc(d.get('target'))}"
         if act == "config.override" and "config_change" in k:
             return (f"⚙️ <b>Phân công thay đổi</b> ({esc(e['actor'])}): {esc(d.get('target'))} · "
                     f"{KEY_LABELS.get(d.get('key'), esc(d.get('key')))}: {esc(_fmt(d.get('old')))} → "

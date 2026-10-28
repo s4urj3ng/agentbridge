@@ -43,7 +43,9 @@ def test_claude_stream_reports_real_windows(tmp_path):
 
 def test_claude_limit_uses_provider_reset_time(tmp_path):
     ev = json.loads(json.dumps(RATE_EVENT))
-    ev["rate_limit_info"]["unifiedWindows"]["five_hour"].update(utilization=1.0, status="rejected")
+    reset = int(time.time()) + 3600         # fresh: RESET_5H ages while the rest of the suite runs
+    ev["rate_limit_info"]["resetsAt"] = reset
+    ev["rate_limit_info"]["unifiedWindows"]["five_hour"].update(utilization=1.0, status="rejected", resetsAt=reset)
     err = dict(RESULT, is_error=True, subtype="error_during_execution", structured_output=None,
                result="Claude AI usage limit reached")
     res = _collect(tmp_path, [ev, err], code=1)
