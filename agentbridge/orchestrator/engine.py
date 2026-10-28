@@ -113,8 +113,12 @@ class Engine:
             raise ValueError(f"unknown agent {agent_id}")
         return make_adapter(a["provider"], agent_id, jload(a["config_json"], {}))
 
-    def _pick_agent(self, agent_id: str, purpose: str, allowed: list[str]) -> tuple[str | None, str]:
+    def _pick_agent(self, agent_id: str, purpose: str, allowed: list[str],
+                    order: list[str] | None = None) -> tuple[str | None, str]:
         """The agent itself if admitted, else the first admitted entry of its `fallback_to` list.
+
+        With `order` (the owner set this role's order from Telegram), the fallback is instead the
+        next admitted agent below `agent_id` in that list, wrapping round to the ones above.
 
         Fallback happens only for quota/health refusals (cooldown, rolling window, budget,
         circuit), never for paused/disabled agents, and only to agents the project allows in
@@ -125,7 +129,12 @@ class Engine:
             return agent_id, ""
         if not quota.is_quota_block(why):
             return None, why
-        for fb in overrides.fallback_chain(self.conn, agent_id):
+        if order is not None:
+            i = order.index(agent_id) if agent_id in order else -1
+            chain = order[i + 1:] + order[:max(i, 0)]
+        else:
+            chain = overrides.fallback_chain(self.conn, agent_id)
+        for fb in chain:
             if fb == agent_id or fb not in allowed or self._config_problem(fb):
                 continue
             if quota.admission(self.conn, fb, purpose)[0]:
@@ -930,7 +939,8 @@ class Engine:
                 # the owner removed this worker from the project: follow the new order instead
                 agent, why, action = self._pick_in_order(workers, "work"), "not in project workers", "task.reroute"
             else:
-                (agent, why), action = self._pick_agent(t["assignee"], "work", workers), "task.fallback"
+                order = workers if overrides.has_role_order(self.conn, m.project.slug, "worker") else None
+                (agent, why), action = self._pick_agent(t["assignee"], "work", workers, order), "task.fallback"
             if agent is None:
                 continue  # this agent (and its fallbacks) is unavailable; other agents' tasks still dispatch
             if agent != t["assignee"]:
@@ -978,7 +988,8 @@ class Engine:
                 # the owner removed this reviewer from the project: first admitted one in the new order
                 agent, why, action = self._pick_in_order(reviewers, "review"), "not in project reviewers", "review.reroute"
             else:
-                (agent, why), action = self._pick_agent(t["reviewer"], "review", reviewers), "review.fallback"
+                order = reviewers if overrides.has_role_order(self.conn, m.project.slug, "reviewer") else None
+                (agent, why), action = self._pick_agent(t["reviewer"], "review", reviewers, order), "review.fallback"
             if agent is None:
                 continue
             if agent != t["reviewer"]:
