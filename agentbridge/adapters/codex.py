@@ -27,6 +27,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 from ..policies.safety import redact
 from ..workers import process
@@ -34,6 +35,21 @@ from .base import (AgentAdapter, AgentResult, AuthStatus, Capability, ExecReques
                    classify_text)
 
 REQUIRED_FLAGS = ("--json", "--sandbox", "--output-schema", "--output-last-message", "--skip-git-repo-check")
+
+
+def strict_schema(schema: Any) -> Any:
+    """OpenAI strict structured output: every object lists ALL its properties in `required` and has
+    additionalProperties false; `default` is not supported. Optional fields (e.g. ReviewResult.issues)
+    otherwise make every `codex exec --output-schema` call fail with invalid_json_schema (HTTP 400)."""
+    if isinstance(schema, list):
+        return [strict_schema(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: strict_schema(v) for k, v in schema.items() if k != "default"}
+    if isinstance(out.get("properties"), dict):
+        out["required"] = list(out["properties"])
+        out["additionalProperties"] = False
+    return out
 
 
 class CodexAdapter(AgentAdapter):
@@ -115,7 +131,7 @@ class CodexAdapter(AgentAdapter):
         if req.output_schema:
             schema_file = req.run_dir / "output_schema.json"
             req.run_dir.mkdir(parents=True, exist_ok=True)
-            schema_file.write_text(json.dumps(req.output_schema))
+            schema_file.write_text(json.dumps(strict_schema(req.output_schema)))
             argv += ["--output-schema", str(schema_file)]
         model = req.model or self.config.get("model")
         if model:

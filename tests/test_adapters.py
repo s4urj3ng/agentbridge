@@ -73,6 +73,17 @@ def test_agy_worker_prompt_lists_allowed_commands(tmp_path):
         ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)).argv[2] == "do it"
 
 
+def test_codex_output_schema_is_openai_strict(tmp_path):
+    """Real failure on the N100: 'schema.required' must include every key in properties (Missing 'issues')."""
+    from agentbridge.adapters.codex import CodexAdapter
+    from agentbridge.orchestrator.decisions import review_result_schema, worker_result_schema
+    for schema in (review_result_schema(), worker_result_schema()):
+        CodexAdapter("x", {"model": "gpt-6.1-sol"}).prepare(ExecRequest("review", "p", tmp_path, tmp_path, 60, schema))
+        sent = json.loads((tmp_path / "output_schema.json").read_text())
+        assert sorted(sent["required"]) == sorted(sent["properties"]) and sent["additionalProperties"] is False
+        assert "default" not in json.dumps(sent)
+
+
 def test_lost_and_timeout(tmp_path):
     ad = ClaudeAdapter("c", {})
     assert ad.collect_result(tmp_path, None).outcome == "lost"
