@@ -75,7 +75,7 @@ def test_telegram_quota_view_probes_antigravity(settings, tmp_path):
     bot = TelegramBot(settings, token="1:x", conn=connect(settings.db_path), client=httpx.Client(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": True}))))
     text, _ = bot.quota_text()
-    assert "agy-argon" in text and "✅  7d" in text and "còn 96%" in text
+    assert "agy-argon" in text and "<code>7d ▓▓▓▓▓▓▓▓▓▓ còn 96%" in text
 
 
 def test_usage_hang_is_bounded_and_retried(tmp_path):

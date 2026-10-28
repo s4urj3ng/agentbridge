@@ -30,7 +30,7 @@ telegram:
   allowed_chat_ids: []               # e.g. [123456789]
   allow_approvals: false             # true = approve/reject buttons in Telegram
   allow_config_changes: false        # true = change worker/reviewer order, fallbacks from ⚙️ Phân công
-  timezone: Asia/Ho_Chi_Minh
+  timezone: Asia/Seoul             # times shown in the bot (Korea time)
   # notify: [milestone_completed, task_blocked, task_completed, approval_requested, agent_cooldown,
   #          agent_auth, agent_circuit, fallback, engine_down, engine_error, draft_pr, config_change]
 

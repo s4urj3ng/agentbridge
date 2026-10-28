@@ -5,15 +5,21 @@ Check quota and progress, and get notified, without touching the server.
 - **Outbound only:** long polling to `api.telegram.org`, no webhook, no open port.
 - **Buttons:** 📊 Quota · 📁 Dự án (projects) · 📝 Chờ duyệt (approvals) · ⚙️ Phân công
   (assignment) · 🔄 Làm mới (refresh). Commands: `/status`, `/quota`, `/approvals`, `/assign`.
-- **Quota view:** for each enabled agent:
-  - ✅ **real numbers reported by the provider:** Antigravity's `/usage` (Gemini, Claude/GPT and
-    Argon groups), re-read for free when you open the view; and Claude Code's 5-hour and 7-day
-    % left from its last call; Codex's 5-hour and weekly % from the session file Codex itself
-    writes after each run. A window whose
-    reset time has passed is shown as "đã reset (chưa đo lại)" (reset, not measured since), not
-    as a stale number. `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
+- **Quota view:** agents grouped by role (🧠 Tech Lead, 🛠 Code, 🔍 Review), with one aligned
+  line per provider window, for example `5h ▓▓▓▓▓░░░░░ còn 46% ↻ 52p` (↻ = time until reset: minutes
+  or hours within a day, otherwise weekday and time, e.g. `T7 14:13`). The header shows the current
+  time in `telegram.timezone` (default `Asia/Seoul`, "giờ Hàn").
+  - The numbers are the **real figures reported by the provider**:
+    - Antigravity's `/usage` (Gemini, Claude/GPT and Argon groups), re-read for free when you open
+      the view or tap 🔄 Làm mới;
+    - Claude Code's 5-hour and 7-day usage from its last call;
+    - Codex's 5-hour and weekly usage from the session file Codex writes after each run.
+  - A window whose reset time has passed shows "đã reset · chưa đo lại" instead of a stale
+    number, and measurements older than 3 hours are marked "đo N giờ trước".
+    `agentbridge agents smoke <id>` takes a fresh measurement for one tiny call.
   - Owner budgets (`rolling_limits`) still apply as a safety net but are not shown in the bot.
-  - state: 🔴 cooldown (until the provider's reset time), 🟠 circuit open, ⏸ paused.
+  - State icons: 🟢 ready, 🟡 handing work to its fallbacks (provider stop level, with the reason and
+    the fallback names), 🔴 cooldown or circuit open (with the end time), ⏸ paused.
   Tap an agent for details.
 - **⚙️ Phân công (assignment):** one screen per project (opens directly when there is only one):
   ```
@@ -76,7 +82,7 @@ Check quota and progress, and get notified, without touching the server.
      allowed_chat_ids: [123456789]
      allow_approvals: false
      allow_config_changes: false      # true = change assignment from ⚙️ Phân công
-     timezone: Asia/Ho_Chi_Minh
+     timezone: Asia/Seoul             # default; times in the bot are Korea time
    ```
 5. Test, then run it as a service:
    ```bash

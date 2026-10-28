@@ -97,7 +97,7 @@ def test_telegram_shows_provider_numbers(settings):
     bot = TelegramBot(settings, token="1:x", client=httpx.Client(transport=httpx.MockTransport(
         lambda r: httpx.Response(200, json={"ok": True, "result": True}))), conn=connect(settings.db_path))
     text, _ = bot.quota_text()
-    assert "✅  5h" in text and "còn 88%" in text
+    assert "<code>5h ▓▓▓▓▓▓▓▓▓░ còn 88%" in text
     assert "7d đã reset" in text          # stale window is not shown as a fake number
 
 

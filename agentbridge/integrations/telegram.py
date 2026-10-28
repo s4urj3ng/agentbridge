@@ -48,6 +48,10 @@ MAIN_MENU = [[{"text": "📊 Quota", "callback_data": "quota"}, {"text": "📁 D
 KEY_LABELS = {"default_worker": "worker mặc định", "workers": "thứ tự Code", "reviewers": "thứ tự Review",
               "fallback_to": "thứ tự dự phòng", "enabled": "bật/tắt", "max_concurrency": "số việc song song"}
 CFG_OFF = "Thay đổi phân công qua Telegram đang tắt."
+QUOTA_GROUPS = [("tech_lead", "🧠 TECH LEAD"), ("worker", "🛠 CODE"), ("reviewer", "🔍 REVIEW")]
+QUOTA_ICONS = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🔴", "paused": "⏸", "provider_stop": "🟡"}
+WEEKDAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+TZ_LABELS = {"Asia/Seoul": "giờ Hàn", "Asia/Ho_Chi_Minh": "giờ VN", "UTC": "UTC"}
 CFG_PREFIXES = {"cs:", "cl:", "ca:", "cu:", "cr:", "cg:"}
 STATE_ICONS = {"provider_stop": "🟡", "cooldown": "🔴", "circuit_open": "🔴", "paused": "⏸"}
 ACTION_LABELS = {"start_milestone": "Bắt đầu milestone", "create_draft_pr": "Tạo draft PR",
@@ -98,7 +102,8 @@ class TelegramBot:
         self.allow_approvals = bool(cfg.get("allow_approvals", False))
         self.allow_config_changes = bool(cfg.get("allow_config_changes", False))
         self.notify_kinds = set(cfg.get("notify") or DEFAULT_NOTIFY)
-        self.tz = ZoneInfo(cfg.get("timezone", "Asia/Ho_Chi_Minh"))
+        self.tz = ZoneInfo(cfg.get("timezone", "Asia/Seoul"))
+        self.tz_label = TZ_LABELS.get(str(self.tz), str(self.tz))
         self.client = client or httpx.Client(timeout=40)
         self.conn = conn or connect(settings.db_path)
         self.offset = 0
@@ -153,40 +158,70 @@ class TelegramBot:
         t.join(timeout=25)
 
     def quota_text(self) -> tuple[str, list]:
+        """Grouped by role; one monospace line per provider window so the bars line up on a phone."""
         self.refresh_quota()
-        lines = ["<b>📊 Quota</b>", "<i>✅ số thật nhà cung cấp báo · 🟡 đang nhường việc cho agent dự phòng</i>", ""]
-        buttons = []
+        now = datetime.now(self.tz)
+        lines = [f"<b>📊 Quota</b> · {now:%H:%M} {self.tz_label}",
+                 "<i>🟢 sẵn sàng · 🟡 nhường việc · 🔴 nghỉ/lỗi · ⏸ tạm dừng · ↻ reset sau</i>"]
+        roles = {r["id"]: jload(r["roles_json"], []) for r in rows(self.conn, "SELECT id, roles_json FROM agents")}
+        groups: dict[str, list[dict]] = {g: [] for g, _ in QUOTA_GROUPS}
         for a in quota_report(self.conn):
-            icon = {"ok": "🟢", "cooldown": "🔴", "circuit_open": "🟠", "paused": "⏸", "provider_stop": "🟡"}[a["state"]]
-            head = f"{icon} <b>{esc(a['id'])}</b> · {esc(a['model'] or a['provider'])}"
-            if a["running"]:
-                head += f" · đang chạy {a['running']}/{a['max_concurrency']}"
-            lines.append(head)
-            if a["state"] == "cooldown":
-                lines.append(f"   nghỉ đến {self.t(a['until'])} ({esc(a['reason'])})")
-            elif a["state"] == "circuit_open":
-                lines.append(f"   lỗi liên tiếp, tạm ngắt đến {self.t(a['until'])}")
-            elif a["state"] == "provider_stop":
-                fb = a.get("fallback_to") or []
-                lines.append(f"   đang nhường việc: {esc(_stop_text(a['reason']))}"
-                             + (f" → {esc(', '.join(fb))}" if fb else ""))
-            elif a["state"] == "paused":
-                lines.append(f"   tạm dừng: {esc(a['reason'] or 'bởi chủ')}")
-            for w in a["provider_windows"]:
-                if w["stale"]:
-                    lines.append(f"   ✅ {w['label']:>3} đã reset lúc {self.t(w['resets_at'])} (chưa đo lại)")
-                elif w["left_pct"] is not None:
-                    lines.append(f"   ✅ {w['label']:>3} {bar(w['left_pct'])} còn {w['left_pct']}%"
-                                 + (f" · reset {self.t(w['resets_at'])}" if w["resets_at"] else ""))
-                else:
-                    lines.append(f"   ✅ {w['label']:>3} {w['status']} · reset {self.t(w['resets_at'])}")
-            if a["provider_windows"]:
-                lines.append(f"      <i>đo lúc {self.t(a['provider_quota_at'])}</i>")
-            if not a["provider_windows"]:
-                lines.append(f"   chưa có số liệu quota · 7 ngày: {a['calls_7d']} lượt")
-            buttons.append({"text": a["id"], "callback_data": f"agent:{a['id']}"[:64]})
-        kb = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [[{"text": "⬅️ Menu", "callback_data": "menu"}]]
-        return "\n".join(lines), kb
+            first = next((r for r in roles.get(a["id"], []) if r in groups), "worker")
+            groups[first].append(a)
+        buttons = []
+        for g, title in QUOTA_GROUPS:
+            if not groups[g]:
+                continue
+            lines += ["", f"<b>{title}</b>"]
+            for a in groups[g]:
+                lines += self._quota_agent(a, now)
+                buttons.append({"text": a["id"], "callback_data": f"agent:{a['id']}"[:64]})
+        kb = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+        return "\n".join(lines), kb + [[{"text": "🔄 Làm mới", "callback_data": "quota"},
+                                         {"text": "⬅️ Menu", "callback_data": "menu"}]]
+
+    def _quota_agent(self, a: dict, now: datetime) -> list[str]:
+        icon = QUOTA_ICONS[a["state"]]
+        head = f"{icon} <b>{esc(a['id'])}</b>"
+        if a["running"]:
+            head += f" · ▶️ {a['running']}/{a['max_concurrency']}"
+        at = a.get("provider_quota_at")
+        if a["provider_windows"] and at:
+            age_h = (now - datetime.fromisoformat(at).astimezone(self.tz)).total_seconds() / 3600
+            if age_h >= 3:
+                head += f" · <i>đo {round(age_h)} giờ trước</i>"
+        out = [head]
+        if a["state"] == "cooldown":
+            out.append(f"   nghỉ đến {self.t(a['until'])}")
+        elif a["state"] == "circuit_open":
+            out.append(f"   lỗi liên tiếp, tạm ngắt đến {self.t(a['until'])}")
+        elif a["state"] == "provider_stop":
+            fb = a.get("fallback_to") or []
+            out.append(f"   đang nhường việc: {esc(_stop_text(a['reason']))}" + (f" → {esc(', '.join(fb))}" if fb else ""))
+        elif a["state"] == "paused":
+            out.append(f"   tạm dừng: {esc(a['reason'] or 'bởi chủ')}")
+        for w in a["provider_windows"]:
+            if w["stale"]:
+                body = f"{w['label']} đã reset · chưa đo lại"
+            elif w["left_pct"] is not None:
+                body = f"{w['label']} {bar(w['left_pct'])} còn {w['left_pct']:>2}%"
+                if w["resets_at"]:
+                    body += f" ↻ {self._until(w['resets_at'], now)}"
+            else:
+                body = f"{w['label']} {w['status']}" + (f" ↻ {self._until(w['resets_at'], now)}" if w["resets_at"] else "")
+            out.append(f"<code>{esc(body)}</code>")
+        if not a["provider_windows"]:
+            out.append(f"   chưa có số liệu quota · 7 ngày: {a['calls_7d']} lượt")
+        return out
+
+    def _until(self, iso: str, now: datetime) -> str:
+        """Reset time, short: '1g38' within a day, else weekday and time ('T6 12:13')."""
+        dt = datetime.fromisoformat(iso).astimezone(self.tz)
+        secs = (dt - now).total_seconds()
+        if 0 < secs < 86400:
+            h, m = divmod(int(secs // 60), 60)
+            return f"{h}g{m:02d}" if h else f"{m}p"
+        return f"{WEEKDAYS[dt.weekday()]} {dt:%H:%M}"
 
     def agent_text(self, agent_id: str) -> tuple[str, list]:
         a = next((x for x in quota_report(self.conn) if x["id"] == agent_id), None)
