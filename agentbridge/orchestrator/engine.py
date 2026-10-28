@@ -280,6 +280,29 @@ class Engine:
     def cancel_task(self, task_id: int, actor: str) -> None:
         transition(self.conn, task_id, S.CANCELLED, actor=actor, reason="cancelled by owner")
 
+    def owner_note(self, project_slug: str, text: str, actor: str = "owner") -> list[str]:
+        """Standing owner instruction: stored as trusted project context and handed to the Tech Lead
+        now (a HUMAN_DECISION event per active milestone). Returns the milestone keys notified."""
+        p = row(self.conn, "SELECT * FROM projects WHERE slug=?", project_slug)
+        if p is None:
+            raise ValueError(f"unknown project {project_slug}")
+        text = text.strip()
+        if not text:
+            raise ValueError("empty note")
+        hits = hardware_no_go_hits(text, self.manifest(p["id"]).policy.denied_categories())
+        if hits:
+            raise PolicyViolation(f"note touches denied categories {hits} (project hardware policy)")
+        with tx(self.conn):
+            self._add_context(p["id"], "constraint", "Owner instruction: " + redact(text)[:3000])
+            keys = []
+            for ms in rows(self.conn, "SELECT id, key FROM milestones WHERE project_id=? AND status='ACTIVE'", p["id"]):
+                evq.emit(self.conn, "HUMAN_DECISION", project_id=p["id"], milestone_id=ms["id"],
+                         payload={"action": "owner_note", "approved": True, "note": redact(text)[:1000]},
+                         dedupe_key=f"note:{ms['id']}:{uuid.uuid4().hex}")
+                keys.append(ms["key"])
+            audit(self.conn, actor, "owner.note", project_id=p["id"], milestones=keys, note=text[:300])
+        return keys
+
     def cancel_milestone(self, milestone_id: int, actor: str, reason: str = "cancelled by owner") -> list[str]:
         """Cancel a milestone: open tasks → CANCELLED (running workers are stopped), pending approvals
         expire, pending events are dropped. Returns the cancelled task keys."""

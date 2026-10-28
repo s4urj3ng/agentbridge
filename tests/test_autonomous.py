@@ -74,3 +74,21 @@ def test_cancel_milestone_cli(settings, tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("Continue the port from the hand-over notes.\nLine two."))
     cli.main(base + ["goal", "demo-calc", "-", "--milestone", "AU5"])
     assert q(e, "SELECT goal FROM milestones WHERE key='AU5'")[0]["goal"].endswith("Line two.")
+
+
+def test_owner_note_reaches_tech_lead(settings, tmp_path, capsys, monkeypatch):
+    e = make_engine(settings)
+    register(e, tmp_path, extra_policy={"autonomous": True})
+    e.conn.execute("UPDATE agents SET paused=1 WHERE id='mock-worker'")      # keep the milestone active
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul()", "AU6")
+    run(e, 20)
+    monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings)
+    cli.main(["--data-dir", str(settings.data_dir), "note", "demo-calc", "AgentBridge runs validation; do not look for pytest."])
+    assert "Tech Lead notified for: AU6" in capsys.readouterr().out
+    ev = q(e, "SELECT type, status, payload_json FROM events WHERE milestone_id=? ORDER BY id DESC LIMIT 1", mid)[0]
+    assert ev["type"] == "HUMAN_DECISION" and ev["status"] == "PENDING" and "owner_note" in ev["payload_json"]
+    project = row(e.conn, "SELECT * FROM projects")
+    prompt = build_tech_lead_prompt(e.conn, project=project, milestone=row(e.conn, "SELECT * FROM milestones WHERE id=?", mid),
+                                    event=row(e.conn, "SELECT * FROM events WHERE milestone_id=? ORDER BY id DESC", mid),
+                                    manifest={}, agents={}, limits={})
+    assert "[constraint] Owner instruction: AgentBridge runs validation" in prompt

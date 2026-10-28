@@ -63,6 +63,16 @@ def cmd_goal(args):
     print(f"milestone created: id={mid}")
 
 
+def cmd_note(args):
+    e = _engine(args)
+    text = sys.stdin.read() if args.text == "-" else args.text
+    try:
+        keys = e.owner_note(args.project, text, "owner:cli")
+    except (ValueError, PolicyViolation) as ex:
+        sys.exit(str(ex))
+    print(f"note saved; Tech Lead notified for: {', '.join(keys) or '(no active milestone)'}")
+
+
 def cmd_milestone(args):
     e = _engine(args)
     sql = "SELECT m.id FROM milestones m JOIN projects p ON p.id=m.project_id WHERE "
@@ -288,6 +298,8 @@ def main(argv: list[str] | None = None) -> None:
     x = ps.add_parser("resume"); x.add_argument("slug"); x.set_defaults(fn=lambda a: cmd_project_pause(a, False))
     x = sub.add_parser("goal"); x.add_argument("project"); x.add_argument("goal", help='goal text, or "-" for stdin')
     x.add_argument("--milestone"); x.set_defaults(fn=cmd_goal)
+    x = sub.add_parser("note", help="standing instruction to the project's Tech Lead")
+    x.add_argument("project"); x.add_argument("text", help='note text, or "-" for stdin'); x.set_defaults(fn=cmd_note)
     x = sub.add_parser("milestone"); x.add_argument("action", choices=["cancel"]); x.add_argument("id_or_key")
     x.add_argument("--project"); x.add_argument("--reason", default="cancelled by owner")
     x.set_defaults(fn=cmd_milestone)
