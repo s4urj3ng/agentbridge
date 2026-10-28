@@ -15,21 +15,48 @@ Check quota and progress, and get notified, without touching the server.
   - Owner budgets (`rolling_limits`) still apply as a safety net but are not shown in the bot.
   - state: 🔴 cooldown (until the provider's reset time), 🟠 circuit open, ⏸ paused.
   Tap an agent for details.
-- **⚙️ Phân công (assignment):** shows each project's Tech Lead, worker order and reviewer order,
-  and each agent's fallback chain, enabled state and concurrency (✏️ = overridden at runtime).
-  With `telegram.allow_config_changes: true` you can change them:
-  - project → **👷 Worker mặc định** (pick one), **📋 Thứ tự worker** / **🔍 Thứ tự reviewer**
-    (tap agents in order of preference, then ✅ Xong; 🧹 Chọn lại starts over);
-  - agent → **↪️ Thứ tự dự phòng** (fallback order), **🔢 Song song** (0–8), **⏸ Tắt / ▶️ Bật**;
-  - **♻️ Về cấu hình gốc** drops the overrides of that project/agent.
-  Every change goes through a **✅ Xác nhận** step and is then validated, saved in the database
-  (it takes precedence over the yaml and manifest and survives restarts), audited as
-  `telegram:<user id>`, and announced to all allowed chats. It applies to the next dispatch;
-  running work is not stopped. Details: [ALLOCATION.md](ALLOCATION.md).
+- **⚙️ Phân công (assignment):** one screen per project (opens directly when there is only one):
+  ```
+  ⚙️ Phân công · g3x-lite
+  🛠 CODE (trên xuống = ưu tiên → dự phòng)
+   1. antigravity-worker   [⬆️][⬇️][➖]
+   2. antigravity-argon    [⬆️][⬇️][➖]
+   [➕ Thêm vào Code]
+  🔍 REVIEW
+   1. antigravity-claude-reviewer  [⬆️][⬇️][➖]
+   2. codex-reviewer               [⬆️][⬇️][➖]
+   [➕ Thêm vào Review]
+  [↩️ Hoàn tác] [♻️ Về gốc] [⬅️ Menu]
+  ```
+  - **One ordered list per role.** Item 1 of CODE is the default worker, item 1 of REVIEW the
+    preferred reviewer. If an agent is refused for quota reasons, the work goes to the next
+    admitted agent below it in the same list, then wraps round to the ones above. Reviews skip the
+    task's author. The Tech Lead is shown read-only.
+  - The icon after a name comes from the quota view: 🟡 handing work over (provider stop level),
+    🔴 cooldown or circuit open, ⏸ paused or disabled.
+  - With `telegram.allow_config_changes: true`, **each tap applies at once**: ⬆️ ⬇️ move, ➖
+    removes (the last agent of a role cannot be removed), and ➕ lists enabled agents with that
+    role that are not in the list yet (one tap adds to the end). **↩️ Hoàn tác** undoes the last
+    change, one step per tap. **♻️ Về gốc** drops the project's override and goes back to the
+    yaml/manifest. The message is edited to show the new order.
+  - Tap an agent's name for a small screen with **⏸ Tắt / ▶️ Bật** and **🔢 Song song** (0–8),
+    plus ↩️ / ♻️ for that agent.
+  - Changes are saved in the database. They take precedence over the yaml and the manifest,
+    survive restarts, apply to the next dispatch (running work is not stopped), and are audited as
+    `telegram:<user id>`. Details: [ALLOCATION.md](ALLOCATION.md).
+- **📝 Approvals:** every approval is a compact card: the action in Vietnamese (Bắt đầu milestone,
+  Tạo draft PR, Gỡ chặn task, Cần quyết định), project · milestone · task, and the first line of the
+  reason (≤160 chars).
+  - The "Cần bạn duyệt" notification carries **✅ Duyệt / ❌ Từ chối / 📄 Xem đầy đủ** when
+    `allow_approvals: true`, otherwise only 📄. The 📝 Chờ duyệt list uses the same cards.
+  - **📄 Xem đầy đủ** sends the full reason plus evidence, split into several messages when it is long.
+  - After a decision the notification is edited to "✅ Đã duyệt #id bởi bạn lúc HH:MM" (or ❌) and
+    its buttons are removed. Tapping a resolved approval again only answers "Đã xử lý rồi".
 - **Notifications** (configurable via `telegram.notify`): milestone completed, task completed,
   task blocked, approval requested, agent cooldown, agent lost its login, agent circuit open,
   quota fallback reroutes, engine stopped or restarted, internal engine errors, draft PR opened,
-  assignment changes (`config_change`).
+  assignment changes made outside Telegram and queued tasks moved by a new order (`config_change`).
+  Taps on ⚙️ itself are not re-broadcast: the edited screen shows the result.
   The first start does not replay old history; a restart continues from a cursor stored in the DB.
 
 ## Setup
@@ -65,10 +92,12 @@ Check quota and progress, and get notified, without touching the server.
   still apply (no protected-branch merges, hardware no-go), and each action is audited as
   `telegram:<user id>`. It is off by default.
 - `allow_config_changes: true` lets the allowed chats change standing configuration: which agent
-  works and reviews, in which order, fallbacks, enable/disable and concurrency. It is off by
-  default; when off the ⚙️ view is read-only and every change button is refused. Choices are
-  validated (known ids, enabled, correct role, a task's author never reviews it); hardware no-go,
-  protected branches and the Antigravity external-model guard cannot be changed from Telegram.
+  works and reviews, in which order (and so the fallback order), enable/disable and concurrency.
+  It is off by default; when off, the ⚙️ screen is read-only and every change button is refused.
+  Each tap applies immediately, so the safety net is: owner chats only, an audit entry per change,
+  ↩️ Hoàn tác, ♻️ Về gốc, and validation (known ids, enabled, correct role, never the last agent of
+  a role, a task's author never reviews it). Hardware no-go, protected branches and the
+  Antigravity external-model guard cannot be changed from Telegram.
 - Messages contain redacted summaries only (task keys, states, short reasons). Logs, diffs,
   prompts and credentials are never sent. Note that these summaries do leave the server and go
   through Telegram.

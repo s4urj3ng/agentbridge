@@ -37,7 +37,7 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
   fallback that is admitted **and** allowed by the project manifest in that role. A reviewer
   fallback is never the task's own author. Paused or disabled agents do not fall back: they wait
   for the owner. Every reroute is in the audit log (`task.fallback`, `review.fallback`).
-  The chain can be reordered from Telegram (see below).
+  A Telegram role-order override replaces it with the project's list order (see below).
 - **`rolling_limits`** caps calls per window, for example `[{hours: 5, max: 6}, {hours: 168, max: 40}]`
   on the Antigravity-Claude reviewer. When its 5-hour cap is reached, reviews move on
   immediately instead of waiting for the next window or draining the weekly allowance.
@@ -66,34 +66,43 @@ goal ─▶ Tech Lead (Claude Team, Opus 5.5 medium) plans tasks
 
 ## Changing assignment from Telegram (runtime overrides)
 
-With `telegram.allow_config_changes: true`, the **⚙️ Phân công** view lets the owner change, without
-editing the server config:
+With `telegram.allow_config_changes: true`, the **⚙️ Phân công** screen ([TELEGRAM.md](TELEGRAM.md))
+keeps **one ordered list per role** for each project:
 
-- per project: the **default worker**, the ordered **workers** list and the ordered **reviewers**
-  list (first = preferred). Only identities that are enabled and have that role can be chosen;
-- per agent: the ordered **`fallback_to`** chain, **enabled/disabled** and **`max_concurrency`** (0–8).
+- **CODE** (workers): item 1 is the default worker, the rest are its fallbacks in order;
+- **REVIEW** (reviewers): item 1 is the preferred reviewer.
 
-These are stored in the `overrides` table (migration `0003_overrides`) and take precedence over
-`/etc/agentbridge/agentbridge.yaml` and the project manifest. They survive `sync_agents()` and
-service restarts. **♻️ Về cấu hình gốc** deletes a project's or agent's overrides and restores the
-config values. Where the effective values are used:
+**Fallback with an override:** when a project has a role-order override, `Engine._pick_agent` ignores
+the agents' `fallback_to` for that role. A quota-refused agent hands the work to the next admitted
+agent below it in the list, then wraps round to the ones above. Reviews skip the task's author.
+
+**Without an override:** the old behaviour applies (manifest order plus each agent's `fallback_to`
+from the yaml).
+
+Per agent, the screen also sets **enabled/disabled** and **`max_concurrency`** (0–8). Per-agent
+`fallback_to` overrides from the first Telegram version are still honoured, but can no longer be
+edited. Legacy `default_worker` overrides are read as "move this agent to the top of CODE".
+
+Overrides live in the `overrides` table (migration `0003_overrides`). Every change keeps a snapshot
+in `override_history` (`0004_override_history`) for **↩️ Hoàn tác**. They take precedence over
+`/etc/agentbridge/agentbridge.yaml` and the project manifest and survive `sync_agents()` and
+restarts. **♻️ Về gốc** deletes them and restores the config values. Where they are used:
 
 - `Engine.manifest()` applies project overrides, so the Tech Lead roster (`_agent_roster`, the
-  "Available identities" prompt section), decision validation (`CREATE_TASKS`, `ASSIGN_TASK`,
-  `REQUEST_REVIEW`), dispatch and review routing all see the new order.
-- `_pick_agent` and the quota view read `fallback_to` through `overrides.fallback_chain`.
+  "Available identities" prompt section, which states that lists are in preference order),
+  decision validation (`CREATE_TASKS`, `ASSIGN_TASK`, `REQUEST_REVIEW`), dispatch and review
+  routing all see the new order.
 - `enabled` / `max_concurrency` are written to the `agents` row and re-applied after every config sync.
-- A queued task whose assignee was removed from the project's workers goes to the first admitted
-  worker in the new order (default worker first), and a pending review whose reviewer was removed
-  goes to the first admitted reviewer that is not the task's author (`task.reroute` /
-  `review.reroute` in the audit log). Running work is not interrupted. Disabling an agent works as
-  before: its queued tasks wait, they are not rerouted.
+- A queued task whose assignee was removed from CODE goes to the first admitted agent in the new
+  list. A pending review whose reviewer was removed goes to the first admitted reviewer that is not
+  the task's author. These show as `task.reroute` / `review.reroute` in the audit log. Running work
+  is not interrupted. Disabling an agent works as before: its queued tasks wait and are not rerouted.
 
-Validation refuses unknown ids, wrong roles, disabled agents in project lists, duplicates, an agent
-falling back to itself or to an agent with no shared role, and a reviewer list that contains only
-the default worker (a task's author never reviews it). Hard safety policy is not configurable here:
-hardware no-go, protected branches and the Antigravity external-model guard apply unchanged.
-Every change is audited (`config.override` / `config.reset`, actor `telegram:<user id>`).
+Validation refuses unknown ids, wrong roles, adding a disabled agent, duplicates, removing the last
+agent of a role, and a REVIEW list that contains only CODE item 1 (a task's author never reviews
+it). Hard safety policy is not configurable here: hardware no-go, protected branches and the
+Antigravity external-model guard apply unchanged. Every change is audited (`config.override` /
+`config.reset` / `config.undo`, actor `telegram:<user id>`).
 
 ## Tuning
 
