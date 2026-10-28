@@ -111,8 +111,10 @@ class AntigravityAdapter(AgentAdapter):
             return ""
         listed = ", ".join(f"`{c}`" for c in cmds) or "(none)"
         return ("\n\n## Shell commands available to you\nYou run headless: a shell command outside this list is "
-                "refused and ends your turn with no result, so the task fails. Allowed (a command may chain "
-                f"these with &&): {listed}. Use your file read/search/edit tools for everything else. Do not "
+                f"refused and ends your turn with no result, so the task fails. Allowed: {listed}. Run ONE "
+                "command per call: no newlines, no ';', no pipes into other programs, no redirections, no "
+                "$VARIABLES or subshells ('&&' only between allowed commands). Use your file read/search/edit "
+                "tools for everything else. Do not "
                 "commit, push or install anything: AgentBridge commits your changes and runs validation itself.")
 
     def prepare(self, req: ExecRequest) -> Invocation:
