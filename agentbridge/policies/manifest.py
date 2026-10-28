@@ -53,6 +53,9 @@ class PolicySection(_Strict):
     hardware_no_go: list[str] = Field(default_factory=list)
     hardware_policy: Literal["none", "STRICT_NO_GO"] = "none"
     auto_start: bool = True               # False: new goals wait for owner approval
+    # True: the owner pre-authorises the Tech Lead to keep a milestone moving on its own (retry,
+    # revise, reassign, review) instead of asking; only scope changes still go to the owner.
+    autonomous: bool = False
     draft_pr: Literal["never", "approval", "auto"] = "approval"
     protected_branches: list[str] = Field(default_factory=list)
     max_changed_files: int = 50

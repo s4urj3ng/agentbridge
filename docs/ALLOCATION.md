@@ -104,6 +104,36 @@ it). Hard safety policy is not configurable here: hardware no-go, protected bran
 Antigravity external-model guard apply unchanged. Every change is audited (`config.override` /
 `config.reset` / `config.undo`, actor `telegram:<user id>`).
 
+## Unattended projects (`policy.autonomous`)
+
+With `policy.autonomous: true` (and `auto_start: true`) in a project manifest, the owner
+pre-authorises the Tech Lead to keep a milestone moving without asking. A failed or blocked task is
+revised with concrete feedback or reassigned to the next listed worker. Passing work is reviewed by
+the first listed reviewer, and a "changes requested" review leads to a revision. The prompt carries
+these rules, and AgentBridge rejects any `REQUEST_HUMAN_APPROVAL` except `scope_change`.
+
+Limits still bound the loop (`max_revisions`, `max_execution_failures`,
+`max_tl_invocations_per_milestone`). When a cap is hit, the engine itself asks the owner. Draft PRs
+still need approval, and hard policy is unchanged. G3X Lite runs this way since 2026-10-28, with
+`review_policy: always`.
+
+Owner commands:
+
+```bash
+agentbridge milestone cancel PORT-9B --project g3x-lite --reason "done elsewhere"
+agentbridge goal g3x-lite - --milestone PORT-10 < handoff.md
+```
+
+`milestone cancel` cancels open tasks (running workers are stopped), expires pending approvals and
+drops queued events. `goal -` reads a long goal or hand-over text from stdin.
+
+## Antigravity tool permissions
+
+Headless `agy` auto-denies tools it cannot prompt for. A worker that needs to run commands (tests,
+git) must have them allowed in the `agentbridge` user's `~/.gemini/antigravity-cli/settings.json`,
+for example `{"permissions": {"allow": ["command(python3)", "command(git status)"]}}`. Without
+that, the adapter reports "denied tool permission(s)" instead of an invalid result.
+
 ## Tuning
 
 All `max` values are starting points; the providers' real quotas are not machine-readable. Watch

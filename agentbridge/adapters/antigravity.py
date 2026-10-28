@@ -132,6 +132,14 @@ class AntigravityAdapter(AgentAdapter):
         res = AgentResult("success", structured=d.get("structured_output") if isinstance(d.get("structured_output"), dict) else None,
                           text=str(d.get("response") or ""), input_tokens=usage.get("input_tokens"),
                           output_tokens=usage.get("output_tokens"), duration_s=dur)
+        denied = [x.get("display_name") or x.get("action") for x in d.get("denied_actions") or [] if isinstance(x, dict)]
+        if denied and res.structured is None and not res.text.strip():
+            # headless mode auto-denies tools it cannot prompt for; say so instead of "invalid result"
+            res.outcome = "failed"
+            res.detail = (f"Antigravity denied tool permission(s) {sorted(set(denied))} and produced no result; "
+                          "allow them in the agentbridge user's ~/.gemini/antigravity-cli/settings.json "
+                          "(permissions.allow, e.g. command(python3))")
+            return res
         if str(d.get("status", "")).upper() != "SUCCESS":
             outcome, retry = classify_text(json.dumps(d)[:5000] + stderr[-3000:], 1)
             res.outcome = outcome if outcome != "success" else "failed"

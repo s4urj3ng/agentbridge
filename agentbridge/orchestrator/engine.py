@@ -39,7 +39,7 @@ from . import overrides, quota
 from .context import build_review_prompt, build_tech_lead_prompt, build_worker_prompt
 from .decisions import (DecisionEnvelope, MalformedDecision, ReviewResult, WorkerResult, envelope_json_schema,
                         parse_envelope, review_result_schema, worker_result_schema)
-from .states import TERMINAL, InvalidTransition, StaleTransition, TaskState as S, transition
+from .states import ALLOWED, TERMINAL, InvalidTransition, StaleTransition, TaskState as S, transition
 
 log = logging.getLogger("agentbridge.engine")
 
@@ -279,6 +279,34 @@ class Engine:
 
     def cancel_task(self, task_id: int, actor: str) -> None:
         transition(self.conn, task_id, S.CANCELLED, actor=actor, reason="cancelled by owner")
+
+    def cancel_milestone(self, milestone_id: int, actor: str, reason: str = "cancelled by owner") -> list[str]:
+        """Cancel a milestone: open tasks → CANCELLED (running workers are stopped), pending approvals
+        expire, pending events are dropped. Returns the cancelled task keys."""
+        with tx(self.conn):
+            ms = row(self.conn, "SELECT * FROM milestones WHERE id=?", milestone_id)
+            if ms is None:
+                raise ValueError(f"unknown milestone {milestone_id}")
+            if ms["status"] in ("COMPLETED", "CANCELLED"):
+                raise ValueError(f"milestone {ms['key']} is already {ms['status']}")
+            keys = []
+            for t in rows(self.conn, "SELECT id, key, state FROM tasks WHERE milestone_id=?", milestone_id):
+                if S(t["state"]) in TERMINAL:
+                    continue
+                if S.CANCELLED not in ALLOWED[S(t["state"])]:     # APPROVED: step back first
+                    transition(self.conn, t["id"], S.BLOCKED, actor=actor, reason=reason, blocked_reason=reason)
+                transition(self.conn, t["id"], S.CANCELLED, actor=actor, reason=reason)
+                keys.append(t["key"])
+            self.conn.execute("UPDATE milestones SET status='CANCELLED', summary=COALESCE(summary, ?) WHERE id=?",
+                              (reason[:500], milestone_id))
+            self.conn.execute("UPDATE approval_requests SET status='EXPIRED', resolved_by=?, resolved_at=?, "
+                              "resolution_note=? WHERE milestone_id=? AND status='PENDING'",
+                              (actor, now_iso(), reason[:500], milestone_id))
+            self.conn.execute("UPDATE events SET status='DONE', error=? WHERE milestone_id=? AND "
+                              "status IN ('PENDING','DEFERRED')", ("milestone cancelled", milestone_id))
+            audit(self.conn, actor, "milestone.cancel", project_id=ms["project_id"], milestone=ms["key"],
+                  tasks=keys, reason=reason[:300])
+        return keys
 
     def request_merge(self, project_slug: str, source: str, target: str, actor: str) -> None:
         """v1 policy: no automatic merges into protected branches, ever."""
@@ -589,7 +617,7 @@ class Engine:
         prompt = build_tech_lead_prompt(
             self.conn, project=project, milestone=milestone, event=ev,
             manifest={"charter": m.charter, "denied_categories": m.policy.denied_categories(),
-                      "validation_names": list(m.validation.commands)},
+                      "validation_names": list(m.validation.commands), "autonomous": m.policy.autonomous},
             agents=self._agent_roster(m), limits={k: lim[k] for k in ("max_task_depth", "max_tasks_per_milestone",
                                                                         "max_revisions")},
             previous_rejection=ev["error"] if ev["attempts"] > 1 else None)
@@ -844,6 +872,11 @@ class Engine:
                              dedupe_key=f"approval:{a['id']}")
             return
         if d.type == "REQUEST_HUMAN_APPROVAL":
+            if m.policy.autonomous and d.action != "scope_change":
+                raise PolicyViolation(
+                    "autonomous mode: the owner pre-authorised you to decide. Use REQUEST_REVISION with concrete "
+                    "feedback, ASSIGN_TASK to another listed worker, or REQUEST_REVIEW; only scope_change goes "
+                    "to the owner")
             task_id = None
             if d.task_id is not None:
                 task_id = self._task_in_milestone(d.task_id, milestone)["id"]

@@ -89,6 +89,21 @@ Guidelines:
 """
 
 
+AUTONOMOUS_RULES = """## Autonomous mode (owner-authorised)
+The owner runs this project unattended and has pre-authorised you to keep the milestone moving.
+Do not ask the owner to unblock, reassign, retry or pick between options: REQUEST_HUMAN_APPROVAL
+is rejected here except for action scope_change (changing the milestone's goal or scope).
+- Worker failed or the task is BLOCKED: REQUEST_REVISION with concrete feedback from the
+  validation output / failure, or ASSIGN_TASK to the next listed worker if the same worker keeps failing.
+- Validation passed: REQUEST_REVIEW from the first listed reviewer (never the task's author).
+- Review requested changes: REQUEST_REVISION with the reviewer's issues; approve only after an
+  approving review and passing validation.
+- Respect the revision limit; if a task truly cannot be done, BLOCK_TASK with the reason and
+  continue with the work that does not depend on it.
+- When every task is done, COMPLETE_MILESTONE.
+Hard policy (hardware no-go, protected branches, forbidden paths) still applies and cannot be waived."""
+
+
 def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, milestone: sqlite3.Row,
                            event: sqlite3.Row, manifest: dict, agents: dict[str, list[str]], limits: dict,
                            previous_rejection: str | None = None) -> str:
@@ -118,6 +133,8 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
         f"- id={t['id']} key={t['key']} state={t['state']} assignee={t['assignee']} kind={t['kind']} "
         f"revisions={t['revision_count']} deps={deps.get(t['id'], [])} :: {t['title'][:100]}" for t in tasks)
         or "(none yet)"))
+    if manifest.get("autonomous"):
+        sections.append(AUTONOMOUS_RULES)
     sections.append("## Available identities\n" + json.dumps(agents))
     sections.append("## Limits\n" + json.dumps(limits))
     sections.append("## Validation commands (by name)\n" + json.dumps(sorted(manifest.get("validation_names", []))))

@@ -53,11 +53,33 @@ def cmd_project_pause(args, paused=True):
 
 def cmd_goal(args):
     e = _engine(args)
+    goal = sys.stdin.read() if args.goal == "-" else args.goal   # "-": long goal text from stdin
+    if not goal.strip():
+        sys.exit("empty goal")
     try:
-        mid = e.submit_goal(args.project, args.goal, args.milestone)
+        mid = e.submit_goal(args.project, goal, args.milestone)
     except PolicyViolation as ex:
         sys.exit(f"rejected by policy: {ex}")
     print(f"milestone created: id={mid}")
+
+
+def cmd_milestone(args):
+    e = _engine(args)
+    sql = "SELECT m.id FROM milestones m JOIN projects p ON p.id=m.project_id WHERE "
+    if args.id_or_key.isdigit():
+        r = row(e.conn, sql + "m.id=?", int(args.id_or_key))
+    else:
+        found = rows(e.conn, sql + "m.key=? AND (? IS NULL OR p.slug=?)", args.id_or_key, args.project, args.project)
+        if len(found) > 1:
+            sys.exit("several milestones have that key: pass --project")
+        r = found[0] if found else None
+    if r is None:
+        sys.exit(f"unknown milestone {args.id_or_key!r}")
+    try:
+        keys = e.cancel_milestone(r["id"], "owner:cli", args.reason)
+    except ValueError as ex:
+        sys.exit(str(ex))
+    print(f"milestone {args.id_or_key} cancelled; tasks cancelled: {', '.join(keys) or '-'}")
 
 
 def cmd_run(args):
@@ -264,8 +286,11 @@ def main(argv: list[str] | None = None) -> None:
     ps.add_parser("list").set_defaults(fn=cmd_project_list)
     x = ps.add_parser("pause"); x.add_argument("slug"); x.set_defaults(fn=lambda a: cmd_project_pause(a, True))
     x = ps.add_parser("resume"); x.add_argument("slug"); x.set_defaults(fn=lambda a: cmd_project_pause(a, False))
-    x = sub.add_parser("goal"); x.add_argument("project"); x.add_argument("goal"); x.add_argument("--milestone")
-    x.set_defaults(fn=cmd_goal)
+    x = sub.add_parser("goal"); x.add_argument("project"); x.add_argument("goal", help='goal text, or "-" for stdin')
+    x.add_argument("--milestone"); x.set_defaults(fn=cmd_goal)
+    x = sub.add_parser("milestone"); x.add_argument("action", choices=["cancel"]); x.add_argument("id_or_key")
+    x.add_argument("--project"); x.add_argument("--reason", default="cancelled by owner")
+    x.set_defaults(fn=cmd_milestone)
     x = sub.add_parser("run", help="host worker: execute the orchestration loop")
     x.add_argument("--until-idle", action="store_true"); x.add_argument("--max-seconds", type=float)
     x.add_argument("-v", "--verbose", action="store_true"); x.set_defaults(fn=cmd_run)

@@ -53,6 +53,14 @@ def test_agy_collect(tmp_path):
     assert r.outcome == "success" and r.structured["n"] == 7 and r.input_tokens == 17536
 
 
+def test_agy_denied_permission_is_explained(tmp_path):
+    """Real run on the N100: headless agy auto-denied RunCommand and returned an empty response."""
+    out = {"status": "SUCCESS", "response": "", "num_turns": 1, "usage": {"input_tokens": 9248, "output_tokens": 703},
+           "denied_actions": [{"action": "command", "display_name": "RunCommand"}]}
+    r = AntigravityAdapter("a", {}).collect_result(_run_dir(tmp_path, json.dumps(out)), ExitInfo(0, "exited", 14))
+    assert r.outcome == "failed" and "denied tool permission" in r.detail and "RunCommand" in r.detail
+
+
 def test_lost_and_timeout(tmp_path):
     ad = ClaudeAdapter("c", {})
     assert ad.collect_result(tmp_path, None).outcome == "lost"
