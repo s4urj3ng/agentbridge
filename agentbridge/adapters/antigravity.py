@@ -95,12 +95,34 @@ class AntigravityAdapter(AgentAdapter):
             return False, f"model {model!r} uses Antigravity's small external-model quota; set allow_external_models to use it"
         return True, ""
 
+    def allowed_commands(self) -> list[str] | None:
+        """`command(...)` allow rules from agy's settings.json (None when it cannot be read)."""
+        path = Path(self.config.get("settings_path") or Path.home() / ".gemini" / "antigravity-cli" / "settings.json")
+        try:
+            rules = (json.loads(path.read_text()).get("permissions") or {}).get("allow") or []
+        except (OSError, ValueError, AttributeError):
+            return None
+        return [r[8:-1] for r in rules if isinstance(r, str) and r.startswith("command(") and r.endswith(")")]
+
+    def command_hint(self) -> str:
+        """Headless agy auto-denies any other shell command and then ends the turn with no result."""
+        cmds = self.allowed_commands()
+        if cmds is None:
+            return ""
+        listed = ", ".join(f"`{c}`" for c in cmds) or "(none)"
+        return ("\n\n## Shell commands available to you\nYou run headless: a shell command outside this list is "
+                "refused and ends your turn with no result, so the task fails. Allowed (a command may chain "
+                f"these with &&): {listed}. Use your file read/search/edit tools for everything else. Do not "
+                "commit, push or install anything: AgentBridge commits your changes and runs validation itself.")
+
     def prepare(self, req: ExecRequest) -> Invocation:
         ok, why = self.model_allowed(req.model or self.config.get("model"))
         if not ok:
             raise PolicyViolation(why)
         exe = self.executable or self.executable_default
         prompt = req.prompt
+        if req.purpose == "work":
+            prompt += self.command_hint()
         if len(prompt.encode()) > MAX_ARG_PROMPT:
             prompt = prompt.encode()[:MAX_ARG_PROMPT].decode(errors="ignore") + "\n[prompt truncated]"
         argv = [exe, "--print", prompt, "--output-format", "json"]

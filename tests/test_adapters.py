@@ -61,6 +61,18 @@ def test_agy_denied_permission_is_explained(tmp_path):
     assert r.outcome == "failed" and "denied tool permission" in r.detail and "RunCommand" in r.detail
 
 
+def test_agy_worker_prompt_lists_allowed_commands(tmp_path):
+    st = tmp_path / "settings.json"
+    st.write_text(json.dumps({"permissions": {"allow": ["command(git status)", "command(python3)", "read_file(/x)"]}}))
+    ad = AntigravityAdapter("a", {"settings_path": str(st), "model": "gemini-3.8-flash-high"})
+    work = ad.prepare(ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)).argv[2]
+    assert "`git status`, `python3`" in work and "read_file" not in work and work.startswith("do it")
+    review = ad.prepare(ExecRequest("review", "check it", tmp_path, tmp_path, 60, None)).argv[2]
+    assert review == "check it"
+    assert AntigravityAdapter("a", {"settings_path": str(tmp_path / "missing.json"), "model": "gemini-3.8-flash-high"}).prepare(
+        ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)).argv[2] == "do it"
+
+
 def test_lost_and_timeout(tmp_path):
     ad = ClaudeAdapter("c", {})
     assert ad.collect_result(tmp_path, None).outcome == "lost"
