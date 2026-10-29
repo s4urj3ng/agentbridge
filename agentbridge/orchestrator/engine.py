@@ -1392,6 +1392,9 @@ class Engine:
         m = self.manifest(project["id"])
         ws = self.workspace(project, m)
         integ = self.s.workspaces_dir / project["slug"] / f"{slugify(milestone['key'])}-integration"
+        step_pr = self.github.enabled and self.github.step_prs and repo_slug_from_url(project["remote_url"])
+        if step_pr:
+            await self._open_step_pr(t, project, milestone, ws, m)
         try:
             sha = await asyncio.to_thread(ws.merge_into, integ, milestone["integration_branch"], t["branch"],
                                           f"agentbridge: integrate {t['key']} ({t['title'][:60]})\n\nTask-Id: {task_id}")
@@ -1403,6 +1406,13 @@ class Engine:
                              dedupe_key=f"blocked:{task_id}:merge:{t['head_sha']}")
             return
         transition(self.conn, task_id, S.COMPLETED, actor="engine", reason=f"integrated at {sha[:12]}")
+        if step_pr:
+            try:  # GitHub sees the step PR's commits on its base and shows it as merged into the integration branch
+                await asyncio.to_thread(ws.push_branch, milestone["integration_branch"])
+            except (GitError, PolicyViolation) as e:
+                with tx(self.conn):
+                    audit(self.conn, "engine", "github.step_push_failed", project_id=project["id"], task_id=task_id,
+                          error=redact(str(e))[:500])
         with tx(self.conn):
             self.conn.execute("INSERT INTO git_refs (project_id, milestone_id, task_id, ref_name, sha, kind, created_at) "
                               "VALUES (?,?,?,?,?,?,?)", (project["id"], milestone["id"], task_id,
@@ -1413,6 +1423,37 @@ class Engine:
         except GitError:
             pass  # dirty worktree is kept, never discarded
         self._check_milestone(milestone["id"])
+
+    async def _open_step_pr(self, t: sqlite3.Row, project: sqlite3.Row, milestone: sqlite3.Row, ws: GitWorkspace,
+                            m: Manifest) -> None:
+        """One draft PR per integrated task (task branch -> integration branch), opened just before the merge so
+        its diff is exactly this step. Best effort: a GitHub failure is audited and never blocks integration."""
+        if t["pr_number"]:
+            return
+        try:
+            await asyncio.to_thread(ws.push_branch, milestone["integration_branch"])
+            await asyncio.to_thread(ws.push_branch, t["branch"])
+            reviews = rows(self.conn, "SELECT reviewer, verdict, body FROM reviews WHERE task_id=? ORDER BY id", t["id"])
+            body = (f"## {milestone['key']} · {t['key']}\n\n{t['description']}\n\n"
+                    f"### Acceptance\n" + "\n".join(f"- {a}" for a in jload(t["acceptance_json"], [])) +
+                    f"\n\n### Worker summary\n{t['worker_summary'] or ''}\n\n### Reviews\n" +
+                    "\n".join(f"- **{r['reviewer']}** ({r['verdict']}): {r['body'][:1500]}" for r in reviews) +
+                    f"\n\nRevisions: {t['revision_count']}. Head: `{t['head_sha'] or ''}`.\n\n"
+                    "_Step PR opened as a draft by AgentBridge; it merges into the AgentBridge integration branch "
+                    "(not main) when the task is integrated._")
+            url, num = await asyncio.to_thread(
+                self.github.create_draft_pr, repo=repo_slug_from_url(project["remote_url"]),
+                base=milestone["integration_branch"], head=t["branch"],
+                title=f"[AgentBridge] {milestone['key']} · {t['key']}: {t['title'][:80]}", body=body,
+                workdir=self.s.artifacts_dir, protected=self._protected(m))
+        except (GitError, GitHubError, PolicyViolation) as e:
+            with tx(self.conn):
+                audit(self.conn, "engine", "github.step_pr_failed", project_id=project["id"], task_id=t["id"],
+                      error=redact(str(e))[:500])
+            return
+        with tx(self.conn):
+            self.conn.execute("UPDATE tasks SET pr_url=?, pr_number=? WHERE id=?", (url, num, t["id"]))
+            audit(self.conn, "engine", "github.step_pr", project_id=project["id"], task_id=t["id"], url=url)
 
     def _check_milestone(self, milestone_id: int) -> None:
         ms = row(self.conn, "SELECT * FROM milestones WHERE id=?", milestone_id)

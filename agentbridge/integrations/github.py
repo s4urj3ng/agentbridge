@@ -34,6 +34,7 @@ class GitHubClient:
     def __init__(self, config: dict):
         self.enabled = bool(config.get("enabled"))
         self.gh = config.get("gh_executable", "gh")
+        self.step_prs = bool(config.get("step_prs"))   # a draft PR per integrated task, not only per milestone
 
     def available(self) -> tuple[bool, str]:
         if not self.enabled:

@@ -122,9 +122,28 @@ gateway calls still need verifying with `agents smoke` on the server.
 ## GitHub
 
 ```bash
-sudo -iu agentbridge gh auth login     # fine-grained PAT recommended
+sudo apt-get install -y gh
+sudo -iu agentbridge gh auth login     # fine-grained PAT recommended; paste it, choose HTTPS
+sudo -iu agentbridge gh auth setup-git # git push over HTTPS uses the same token
 ```
 
 Minimal permissions for the selected repositories only: **Contents: read & write** (push
 `agentbridge/*` branches), **Pull requests: read & write** (draft PRs), **Metadata: read**.
 Add branch protection on `main` on GitHub as a second line of defence.
+
+Then in `/etc/agentbridge/agentbridge.yaml`:
+
+```yaml
+github:
+  enabled: true
+  step_prs: true     # also a draft PR per task, not only one per milestone
+```
+
+With `step_prs`, just before a task is merged into the milestone's integration branch AgentBridge
+pushes the integration branch and the task branch and opens a draft PR
+`agentbridge/<project>/<milestone>/<task>` → `agentbridge/<project>/<milestone>/integration`
+with the task's description, acceptance criteria, worker summary and every review. Its diff is
+exactly that step. After the merge the integration branch is pushed again and GitHub shows the
+step PR as merged into the integration branch; `main` is never touched (the milestone PR into
+`main` stays a draft for you). A GitHub failure is audited (`github.step_pr_failed`) and never
+holds up integration. Note that on a public repository every pushed branch is public.
