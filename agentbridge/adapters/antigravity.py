@@ -6,6 +6,7 @@ Verified on this host (agy 1.4.7, `agy --help`, one real call):
     "structured_output": {...}, "usage": {input_tokens, output_tokens, ...}}.
   * `--json-schema <schema>` constrains the final output.
   * `--mode accept-edits|auto|plan`, `--model`, `--sandbox`, `--add-dir`.
+  * `--dangerously-skip-permissions` auto-approves every tool (opt-in: `skip_permissions`).
   * `agy models` lists models (used as a cheap auth probe; no prompt is sent).
 
   * `agy --print /usage --output-format json` runs the /usage slash command
@@ -106,6 +107,10 @@ class AntigravityAdapter(AgentAdapter):
 
     def command_hint(self) -> str:
         """Headless agy auto-denies any other shell command and then ends the turn with no result."""
+        if self.config.get("skip_permissions"):
+            return ("\n\n## Shell commands\nYou may run any shell command you need (tests, git inspection, "
+                    "scripts). Do not commit, push, merge, delete branches or install anything: AgentBridge "
+                    "commits your changes and runs validation itself.")
         cmds = self.allowed_commands()
         if cmds is None:
             return ""
@@ -137,6 +142,9 @@ class AntigravityAdapter(AgentAdapter):
                 argv += ["--sandbox"]
         else:
             argv += ["--mode", "plan"]
+        if self.config.get("skip_permissions"):
+            # owner opt-in (the host is treated as a sandbox): no allow list, nothing auto-denied
+            argv += ["--dangerously-skip-permissions"]
         if req.output_schema:
             argv += ["--json-schema", json.dumps(req.output_schema, separators=(",", ":"))]
         return Invocation(argv=argv, env=self.base_env(), cwd=req.cwd, stdin_prompt=None)

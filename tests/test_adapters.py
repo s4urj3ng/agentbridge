@@ -73,6 +73,16 @@ def test_agy_worker_prompt_lists_allowed_commands(tmp_path):
         ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)).argv[2] == "do it"
 
 
+def test_agy_skip_permissions_opt_in(tmp_path):
+    base = {"model": "gemini-3.8-flash-high", "settings_path": str(tmp_path / "missing.json")}
+    req = ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)
+    assert "--dangerously-skip-permissions" not in AntigravityAdapter("a", base).prepare(req).argv
+    argv = AntigravityAdapter("a", {**base, "skip_permissions": True}).prepare(req).argv
+    assert "--dangerously-skip-permissions" in argv and "any shell command" in argv[2] and "Do not commit, push, merge" in argv[2]
+    review = AntigravityAdapter("a", {**base, "skip_permissions": True}).prepare(ExecRequest("review", "c", tmp_path, tmp_path, 60, None))
+    assert "--dangerously-skip-permissions" in review.argv and review.argv[2] == "c"
+
+
 def test_codex_output_schema_is_openai_strict(tmp_path):
     """Real failure on the N100: 'schema.required' must include every key in properties (Missing 'issues')."""
     from agentbridge.adapters.codex import CodexAdapter

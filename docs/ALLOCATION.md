@@ -134,6 +134,11 @@ git) must have them allowed in the `agentbridge` user's `~/.gemini/antigravity-c
 for example `{"permissions": {"allow": ["command(python3)", "command(git status)"]}}`. Without
 that, the adapter reports "denied tool permission(s)" instead of an invalid result.
 
+On a host you treat as a sandbox, set `skip_permissions: true` on the Antigravity identity instead:
+AgentBridge then passes `--dangerously-skip-permissions`, so no command is denied and the allow list
+is not used. The agent then has everything the `agentbridge` user has, including the GitHub
+credentials and the other agents' logins; only the prompt tells it not to commit, push or merge.
+
 ## Tuning
 
 All `max` values are starting points; the providers' real quotas are not machine-readable. Watch
