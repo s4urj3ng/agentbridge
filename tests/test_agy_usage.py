@@ -97,3 +97,36 @@ def test_run_cmd_not_blocked_by_detached_child(tmp_path):
     t0 = time.time()
     r = run_cmd(["sh", "-c", "setsid sleep 30 & sleep 30"], cwd=tmp_path, timeout_s=1)
     assert r.timed_out and time.time() - t0 < 10
+
+
+def test_home_dir_gives_each_account_its_own_env_settings_and_quota(tmp_path, monkeypatch):
+    """Each Antigravity account lives in its own HOME; /usage is read once per account, not once per binary."""
+    from agentbridge.adapters.antigravity import AntigravityAdapter, _USAGE_CACHE
+    from agentbridge.adapters.base import ExecRequest
+    _USAGE_CACHE.clear()
+    homes = {}
+    for name, frac in (("acc1", 0.9), ("acc2", 0.2)):
+        h = tmp_path / name
+        (h / ".gemini" / "antigravity-cli").mkdir(parents=True)
+        (h / ".gemini" / "antigravity-cli" / "settings.json").write_text(
+            json.dumps({"permissions": {"allow": [f"command(echo {name})"]}}))
+        fx = json.loads(FIXTURE.read_text())
+        for g in fx["command"]["data"]["groups"]:
+            for b in g["buckets"]:
+                b["remaining_fraction"] = frac
+        (h / "usage.json").write_text(json.dumps(fx))
+        homes[name] = h
+    exe = tmp_path / "agy"
+    exe.write_text('#!/bin/sh\ncat "$HOME/usage.json"\n')   # answers from whichever HOME it runs under
+    exe.chmod(0o755)
+    a1 = AntigravityAdapter("agy-1", {"executable": str(exe), "model": "gemini-3.8-flash-high", "home_dir": str(homes["acc1"])})
+    a2 = AntigravityAdapter("agy-2", {"executable": str(exe), "model": "gemini-3.8-flash-high", "home_dir": str(homes["acc2"])})
+    assert a1.base_env()["HOME"] == str(homes["acc1"]) and a2.base_env()["HOME"] == str(homes["acc2"])
+    assert a1.prepare(ExecRequest("work", "p", tmp_path, tmp_path, 60, None)).env["HOME"] == str(homes["acc1"])
+    assert a1.allowed_commands() == ["echo acc1"] and a2.allowed_commands() == ["echo acc2"]
+    assert a1.usage_key != a2.usage_key
+    q1 = a1.quota_for(a1.read_usage_cached())["windows"]["five_hour"]["used_pct"]
+    q2 = a2.quota_for(a2.read_usage_cached())["windows"]["five_hour"]["used_pct"]
+    assert (q1, q2) == (10.0, 80.0)          # not the same cached number for both accounts
+    plain = AntigravityAdapter("agy-0", {"executable": str(exe), "model": "gemini-3.8-flash-high"})
+    assert "HOME" not in plain.base_env() or plain.base_env()["HOME"] == os.environ.get("HOME")

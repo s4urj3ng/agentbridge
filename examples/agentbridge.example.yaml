@@ -102,6 +102,29 @@ agents:
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 12}, {hours: 168, max: 70}]
 
+  # --- Extra Antigravity accounts (each its own login, quota and tool permissions).
+  # home_dir becomes HOME for that identity only; agy keeps login + settings in $HOME/.gemini.
+  # One account can back several identities (one per model pool), as with the default account.
+  # Uncomment after logging in each account (docs/AGENT_AUTH.md, "Several Antigravity accounts").
+  # - id: antigravity-worker-2
+  #   provider: antigravity
+  #   roles: [worker]
+  #   home_dir: /var/lib/agentbridge/identities/antigravity-2
+  #   model: gemini-3.8-flash-high
+  #   provider_stop_pct: {five_hour: 95, seven_day: 90}
+  #   profile: "Second Gemini 3.8 Flash account: same strengths as antigravity-worker, separate quota."
+  #   max_concurrency: 1
+  # - id: antigravity-claude-reviewer-2
+  #   provider: antigravity
+  #   roles: [reviewer]
+  #   home_dir: /var/lib/agentbridge/identities/antigravity-2
+  #   model: claude-opus-5-5-medium
+  #   allow_external_models: true
+  #   provider_stop_pct: {five_hour: 90, seven_day: 80}
+  #   profile: "Claude Opus 5.5 medium via the second Antigravity account: separate small quota."
+  #   max_concurrency: 1
+  # (repeat with antigravity-3 for the third account)
+
   # --- Codex 6.1 high: scarce (5h + weekly). Independent second opinion for high-risk changes,
   # and last fallback reviewer. Model id confirmed in `codex` /model on the N100.
   - id: codex-reviewer

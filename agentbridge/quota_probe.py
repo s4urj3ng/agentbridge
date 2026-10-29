@@ -31,7 +31,7 @@ def refresh_free_quotas(settings: Settings, conn: sqlite3.Connection | None = No
             results[a["id"]] = codex_pq(ad.latest_rate_limits())
         for a in rows(conn, "SELECT id, config_json FROM agents WHERE enabled=1 AND provider='antigravity'"):
             ad = make_adapter("antigravity", a["id"], jload(a["config_json"], {}))
-            key = ad.executable or ""
+            key = ad.usage_key            # one /usage call per Antigravity account
             if key not in cache:
                 cache[key] = ad.read_usage_cached(max_age_s=30)
             results[a["id"]] = ad.quota_for(cache[key])

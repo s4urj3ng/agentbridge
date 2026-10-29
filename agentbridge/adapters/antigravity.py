@@ -16,13 +16,17 @@ Verified on this host (agy 1.4.7, `agy --help`, one real call):
     (Flash, Pro), "Claude and GPT models" (Claude Opus/Sonnet, GPT-OSS) and
     "Gemini 4 Argon".
 
-Not verified: a per-identity config directory. AgentBridge therefore treats
-Antigravity as a single host identity. The prompt is passed as an argument,
-so it is capped below Linux's 128 KiB per-argument limit.
+Separate accounts: agy keeps its login, settings.json (tool permissions) and
+state in $HOME/.gemini. With an empty HOME, `agy models` answers "Please sign
+in" (verified 2026-10-30), so each identity can own an account through
+`home_dir` (exported as HOME for that identity only). Without `home_dir` the
+host user's default login is used. The prompt is passed as an argument, so it
+is capped below Linux's 128 KiB per-argument limit.
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -57,7 +61,11 @@ class AntigravityAdapter(AgentAdapter):
         cap.supports_cwd = True
         cap.can_edit_files = "--mode" in text
         cap.verified = cap.available and cap.headless and cap.structured_output
-        cap.notes.append("single host identity (no verified per-identity config dir)")
+        if self.config.get("home_dir"):
+            cap.isolated_identity = "verified"
+            cap.notes.append(f"own account via HOME={self.home} (login, settings and permissions in .gemini)")
+        else:
+            cap.notes.append("host user's default Antigravity login (set home_dir for a separate account)")
         ok, why = self.model_allowed(self.config.get("model"))
         if not ok:
             cap.available = False
@@ -96,9 +104,28 @@ class AntigravityAdapter(AgentAdapter):
             return False, f"model {model!r} uses Antigravity's small external-model quota; set allow_external_models to use it"
         return True, ""
 
+    # ------------------------------------------------------------ identity (separate accounts)
+    @property
+    def home(self) -> Path:
+        """agy keeps its login, settings and permissions in $HOME/.gemini (verified: an empty HOME
+        reports "Please sign in"). `home_dir` gives an identity its own account."""
+        h = self.config.get("home_dir")
+        return Path(os.path.expanduser(h)) if h else Path.home()
+
+    def base_env(self) -> dict[str, str]:
+        env = super().base_env()
+        if self.config.get("home_dir"):
+            env["HOME"] = str(self.home)
+        return env
+
+    @property
+    def usage_key(self) -> str:
+        """Identities sharing an executable AND a home share one login, hence one /usage reading."""
+        return f"{self.executable or ''}|{self.home}"
+
     def allowed_commands(self) -> list[str] | None:
         """`command(...)` allow rules from agy's settings.json (None when it cannot be read)."""
-        path = Path(self.config.get("settings_path") or Path.home() / ".gemini" / "antigravity-cli" / "settings.json")
+        path = Path(self.config.get("settings_path") or self.home / ".gemini" / "antigravity-cli" / "settings.json")
         try:
             rules = (json.loads(path.read_text()).get("permissions") or {}).get("allow") or []
         except (OSError, ValueError, AttributeError):
@@ -188,15 +215,15 @@ class AntigravityAdapter(AgentAdapter):
         # /usage normally answers in a few seconds, but on the N100 a call occasionally hung for
         # minutes. Keep each try short and retry once rather than block detect/probes.
         for _ in range(2):
-            r = process.run_cmd([exe, "--print", "/usage", "--output-format", "json"], cwd=Path.home(),
+            r = process.run_cmd([exe, "--print", "/usage", "--output-format", "json"], cwd=self.home,
                                 timeout_s=float(self.config.get("usage_timeout_s", 20)), env=self.base_env())
             if r.exit_code == 0:
                 return parse_usage(r.stdout)
         return None
 
     def read_usage_cached(self, max_age_s: float = 60) -> dict[str, dict] | None:
-        """One /usage call serves every identity sharing this executable (same host login)."""
-        key = self.executable or ""
+        """One /usage call serves every identity sharing this login (same executable and home)."""
+        key = self.usage_key
         hit = _USAGE_CACHE.get(key)
         if hit and time.time() - hit[0] < max_age_s:
             return hit[1]

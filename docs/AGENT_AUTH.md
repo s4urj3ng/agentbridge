@@ -48,15 +48,41 @@ Verified (agy 1.4.7): `agy --print <prompt> --output-format json --json-schema <
 --mode accept-edits|plan --model <id> [--sandbox]`. Login is the Antigravity app/CLI login of
 the host user; `agy models` is used as a no-prompt auth probe.
 
-No per-identity config directory was found in `agy --help`, so AgentBridge treats Antigravity as
-a **single host identity**. The prompt is passed as an argument, so it is capped below Linux's
-128 KiB per-argument limit.
+agy keeps its login, settings (including tool permissions) and state in `$HOME/.gemini`. With an
+empty `HOME`, `agy models` answers "Please sign in" (verified 2026-10-30). The default identities
+use the `agentbridge` user's own home. The prompt is passed as an argument, so it is capped below
+Linux's 128 KiB per-argument limit.
 
 ```bash
 sudo -iu agentbridge
 agy            # complete the login flow once
 agy models     # should list models
 ```
+
+### Several Antigravity accounts
+
+Give each extra account its own home with `home_dir` in the identity's config; AgentBridge exports
+it as `HOME` for that identity only. Tokens are never copied between accounts. Copy only the tool
+permission file (`settings.json`), which holds no credentials.
+
+```bash
+sudo -iu agentbridge
+N=2                                              # then 3 for the third account
+H=/var/lib/agentbridge/identities/antigravity-$N
+mkdir -p "$H/.gemini/antigravity-cli" && chmod 700 "$H"
+cp ~/.gemini/antigravity-cli/settings.json "$H/.gemini/antigravity-cli/"   # tool permissions only
+HOME=$H ~/.local/bin/agy                         # sign in with THIS account, then /exit
+HOME=$H ~/.local/bin/agy models | head -3        # must list models
+```
+
+Then add identities with `home_dir: /var/lib/agentbridge/identities/antigravity-N` (templates
+are in `examples/agentbridge.example.yaml`), restart the services and check them:
+`agentbridge agents detect <id>` should show `isolated_identity: verified` and that account's own
+`/usage` numbers. Each account's quota is probed separately.
+
+Before adding accounts, confirm that Google's terms for your plan allow running several accounts
+in an automated pool. AgentBridge does not bypass limits: each account's own limits and cooldowns
+still apply.
 
 ## OpenAI Codex CLI (unverified here)
 
