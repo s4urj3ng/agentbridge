@@ -2,7 +2,7 @@
 {% block body %}
 <h1>Settings</h1>
 <p class="muted">Read-only view. Settings are changed in <code>agentbridge.yaml</code>, environment variables and project manifests on the host, then the services are restarted. This keeps policy out of reach of the web UI and of agents.</p>
-<div class="grid">
+<div class="grid cols">
 <div class="card"><div class="muted">GitHub integration</div>{{ 'enabled' if s.github.enabled else 'disabled' }} · <span class="{{ 'ok' if gh_ok else 'muted' }}">{{ gh_msg }}</span><br>webhook secret: {{ 'configured' if webhook_configured else 'not configured' }}</div>
 <div class="card"><div class="muted">Workspace paths</div>data: <code>{{ s.data_dir }}</code><br>worktrees: <code>{{ s.workspaces_dir }}</code><br>artifacts: <code>{{ s.artifacts_dir }}</code></div>
 <div class="card"><div class="muted">Bind</div>{{ s.bind_host }}:{{ s.port }}</div>

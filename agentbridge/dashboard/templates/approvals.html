@@ -1,18 +1,20 @@
 {% extends "base.html" %}
+{% block title %}Chờ duyệt · AgentBridge{% endblock %}
 {% block body %}
-<h1>Approvals</h1>
+<h1>Chờ duyệt</h1>
+<p class="sub">Những việc Tech Lead hoặc engine cần bạn quyết định.</p>
 {% for a in approvals %}
 <div class="card" style="margin-bottom:10px">
-<div class="row"><b>#{{ a.id }} {{ a.action }}</b><span class="pill">{{ a.status }}</span><span class="muted">{{ a.slug }} · requested by {{ a.requested_by }} · {{ a.created_at }}</span>
-{% if a.task_id %}<a href="/tasks/{{ a.task_id }}">task #{{ a.task_id }}</a>{% endif %}</div>
-<p>{{ a.reason }}</p>
-{% if a.evidence %}<pre>{{ a.evidence|tojson(indent=1) }}</pre>{% endif %}
-{% if a.status == 'PENDING' %}
-<form class="row" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input name="note" placeholder="Note (optional)">
-<button class="primary" formaction="/approvals/{{ a.id }}/approve">Approve</button><button class="danger" formaction="/approvals/{{ a.id }}/reject">Reject</button></form>
-{% else %}<p class="muted">{{ a.status|lower }} by {{ a.resolved_by }} at {{ a.resolved_at }}{% if a.resolution_note %}: {{ a.resolution_note }}{% endif %}</p>{% endif %}
+  <div class="row"><b>#{{ a.id }} · {{ a.action }}</b>
+    <span class="chip {{ 'warn' if a.status == 'PENDING' else ('ok' if a.status == 'APPROVED' else '') }}">{{ {'PENDING': 'chờ duyệt', 'APPROVED': 'đã duyệt', 'REJECTED': 'đã từ chối', 'EXPIRED': 'hết hạn'}.get(a.status, a.status) }}</span>
+    <span class="muted small">{{ a.slug }} · {{ a.requested_by }} · {{ t(a.created_at) }}</span>
+    {% if a.task_id %}<a class="small" href="/tasks/{{ a.task_id }}">task #{{ a.task_id }}</a>{% endif %}</div>
+  <p style="white-space:pre-wrap">{{ a.reason }}</p>
+  {% if a.evidence %}<details><summary class="muted small">Bằng chứng kèm theo</summary><pre>{{ a.evidence|tojson(indent=1) }}</pre></details>{% endif %}
+  {% if a.status == 'PENDING' %}
+  <form class="row" method="post" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf }}"><input name="note" placeholder="Ghi chú cho Tech Lead (không bắt buộc)" style="flex:1;min-width:200px">
+    <button class="primary" formaction="/approvals/{{ a.id }}/approve">Duyệt</button><button class="danger" formaction="/approvals/{{ a.id }}/reject">Từ chối</button></form>
+  {% else %}<p class="muted small">{{ a.resolved_by }} · {{ t(a.resolved_at) }}{% if a.resolution_note %} · {{ a.resolution_note }}{% endif %}</p>{% endif %}
 </div>
-{% else %}<p class="muted">No approval requests.</p>{% endfor %}
-<h2>Audit trail</h2>
-<div class="card scroll"><table>{% for e in trail %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td><code>{{ e.detail_json }}</code></td></tr>{% endfor %}</table></div>
+{% else %}<div class="card empty">Không có gì chờ duyệt.</div>{% endfor %}
 {% endblock %}

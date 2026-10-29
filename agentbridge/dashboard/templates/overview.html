@@ -1,34 +1,61 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Tổng quan · AgentBridge{% endblock %}
 {% block body %}
-<h1>Overview</h1>
-<div class="grid">
-  <div class="card"><div class="muted">Engine</div><div class="kpi {{ 'ok' if health.engine_running else 'bad' }}">{{ 'running' if health.engine_running else 'stopped' }}</div></div>
-  <div class="card"><div class="muted">Agents enabled</div><div class="kpi">{{ agents|selectattr('enabled')|list|length }}/{{ agents|length }}</div></div>
-  <div class="card"><div class="muted">Projects</div><div class="kpi">{{ projects|length }}</div></div>
-  <div class="card"><div class="muted">Queue</div><div class="kpi">{{ queue }}</div></div>
-  <div class="card"><div class="muted">Running</div><div class="kpi">{{ running|length }}</div></div>
-  <div class="card"><div class="muted">Blocked</div><div class="kpi {{ 'bad' if blocked else '' }}">{{ blocked|length }}</div></div>
-  <div class="card"><div class="muted">Pending approvals</div><div class="kpi"><a href="/approvals">{{ status.pending_approvals }}</a></div></div>
+<h1>Tổng quan</h1>
+<p class="sub">Giờ hiển thị: {{ t.tz.key }}. Trang tự cập nhật mỗi 20 giây.</p>
+
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Đang làm</div><div class="num">{{ counts.running }}</div></div>
+  <div class="card kpi"><div class="label">Chờ review</div><div class="num" style="color:var(--rev)">{{ counts.review }}</div></div>
+  <div class="card kpi"><div class="label">Trong hàng đợi</div><div class="num">{{ counts.queued }}</div></div>
+  <div class="card kpi"><div class="label">Bị chặn</div><div class="num {{ 'bad' if counts.blocked }}">{{ counts.blocked }}</div></div>
+  <a class="card kpi" href="/approvals" style="color:inherit;text-decoration:none"><div class="label">Chờ bạn duyệt</div><div class="num {{ 'bad' if counts.approvals }}">{{ counts.approvals }}</div></a>
+  <div class="card kpi"><div class="label">Lượt chạy agent 24h</div><div class="num">{{ counts.attempts_24h }}</div></div>
 </div>
-<h2>Agents</h2>
-<div class="card scroll"><table><tr><th>Identity</th><th>Provider</th><th>State</th><th>Running</th><th>24h calls</th><th>Cooldown</th></tr>
-{% for a in agents %}<tr><td>{{ a.id }}</td><td>{{ a.provider }}</td>
-<td>{% if not a.enabled %}<span class="muted">disabled</span>{% elif a.paused %}<span class="warn">paused</span>{% else %}<span class="ok">enabled</span>{% endif %}</td>
-<td>{{ a.running }}/{{ a.max_concurrency }}</td><td>{{ a.usage.last_24h }}</td><td>{{ a.cooldown_until or '' }} {{ a.cooldown_reason or '' }}</td></tr>{% endfor %}
-</table></div>
-<h2>Running tasks</h2>
-<div class="card scroll">{% if running %}<table>{% for t in running %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a></td><td>{{ t.slug }}</td><td class="st-{{ t.state }}">{{ t.state }}</td><td>{{ t.assignee }}</td></tr>{% endfor %}</table>{% else %}<span class="muted">Nothing running.</span>{% endif %}</div>
-<h2>Blocked tasks</h2>
-<div class="card scroll">{% if blocked %}<table>{% for t in blocked %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a></td><td>{{ t.slug }}</td><td>{{ t.blocked_reason }}</td></tr>{% endfor %}</table>{% else %}<span class="muted">None.</span>{% endif %}</div>
-<h2>Recent events <span class="muted" id="live"></span></h2>
-<div class="card scroll"><table id="events">
-{% for e in events %}<tr><td class="muted">{{ e.created_at }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">#{{ e.task_id }}</a>{% endif %}</td><td><code>{{ e.detail_json[:180] }}</code></td></tr>{% endfor %}
-</table></div>
-<script>
-try{const es=new EventSource('/api/stream');const tb=document.getElementById('events');
-es.onopen=()=>document.getElementById('live').textContent='· live';
-es.onmessage=m=>{const e=JSON.parse(m.data);const tr=document.createElement('tr');
-for(const v of [e.created_at,e.actor,e.action,e.task_id?('#'+e.task_id):'',(e.detail_json||'').slice(0,180)]){const td=document.createElement('td');td.textContent=v;tr.appendChild(td)}
-tb.prepend(tr);while(tb.rows.length>60)tb.deleteRow(-1)};}catch(e){}
-</script>
+
+<div class="grid two" style="margin-top:12px;align-items:start">
+  <div class="grid">
+    {% for c in cards %}
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="muted small">{{ c.project.name }}</div>
+          <div class="row" style="margin-top:2px"><a href="/projects/{{ c.project.slug }}" style="font-size:17px;font-weight:650;color:var(--fg)">{{ c.milestone.key }}</a>
+            <span class="chip {{ 'ok' if c.milestone.status in ('ACTIVE', 'COMPLETED') else ('bad' if c.milestone.status == 'BLOCKED' else 'warn') }}">{{ c.status_vi }}</span>
+            {% if c.project.paused %}<span class="chip warn">dự án tạm dừng</span>{% endif %}</div>
+        </div>
+        <div style="text-align:right"><div style="font-size:30px;font-weight:700;line-height:1">{{ c.pct }}%</div><div class="muted small">{{ c.done }}/{{ c.total }} task xong</div></div>
+      </div>
+      <div style="margin-top:14px">{{ ui.progress(c) }}</div>
+      {{ ui.legend(c) }}
+      {% if c.replaced %}<div class="muted small">{{ c.replaced }} task bị chặn đã được làm lại bằng task mới, chỉ tính một lần.</div>{% endif %}
+      <ul class="tasks">{% for task in c.tasks %}{{ ui.task_row(task) }}{% endfor %}</ul>
+      <p class="muted small" style="margin:10px 0 0">% tính trên kế hoạch hiện tại của Tech Lead, có thể giảm khi nó thêm task.</p>
+    </section>
+    {% else %}
+    <section class="card empty">Chưa có milestone nào. Gửi goal ở trang <a href="/projects">Dự án</a>.</section>
+    {% endfor %}
+
+    <section class="card">
+      <h2 style="margin-top:0">Hoạt động gần đây</h2>
+      <ul class="feed">
+        {% for e in activity %}
+        <li><span class="k {{ e.kind }}"></span><time title="{{ e.at }}">{{ t(e.at) }}</time>
+          <span>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">{{ e.text }}</a>{% else %}{{ e.text }}{% endif %}
+          <span class="muted small"> · {{ e.actor }}</span></span></li>
+        {% else %}<li class="empty">Chưa có hoạt động.</li>{% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2 style="margin-top:0">Quota</h2>
+    {% for g in groups %}
+    <div class="qgroup"><h3>{{ g.label }}</h3>{% for a in g.agents %}{{ ui.quota_agent(a) }}{% endfor %}</div>
+    {% else %}<div class="empty">Chưa có agent nào bật.</div>{% endfor %}
+    <p class="muted small" style="margin:14px 0 0">Số liệu thật do nhà cung cấp báo. <a href="/agents">Chi tiết agent →</a></p>
+  </section>
+</div>
 {% endblock %}
+{% block live %}<script>liveRefresh(20)</script>{% endblock %}

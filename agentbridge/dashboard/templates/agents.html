@@ -1,12 +1,18 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Agent & quota · AgentBridge{% endblock %}
 {% block body %}
-<h1>Agents</h1>
+<h1>Agent & quota</h1>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin:12px 0 8px">
+{% for g in groups %}<section class="card qgroup" style="margin:0"><h3>{{ g.label }}</h3>{% for a in g.agents %}{{ ui.quota_agent(a) }}{% endfor %}</section>{% endfor %}
+</div>
+<h2>Chi tiết từng identity</h2>
 <p class="muted">Capabilities come from <code>agentbridge agents detect</code> on the host. Credentials are never displayed; only login state and method.</p>
 {% for a in agents %}
 <div class="card" style="margin-bottom:12px">
-<div class="row"><b>{{ a.id }}</b><span class="pill">{{ a.provider }}</span><span class="pill">{{ a.roles|join(', ') }}</span>
+<div class="row"><b>{{ a.id }}</b><span class="chip">{{ a.provider }}</span><span class="chip">{{ a.roles|join(', ') }}</span>
 {% if not a.enabled %}<span class="muted">disabled</span>{% elif a.paused %}<span class="warn">paused</span>{% else %}<span class="ok">enabled</span>{% endif %}</div>
-<div class="grid" style="margin-top:8px">
+<div class="grid cols" style="margin-top:8px">
 <div><div class="muted">Detection</div>{% if a.capability %}{{ 'available' if a.capability.available else 'unavailable' }}{% if a.capability.version %} · {{ a.capability.version }}{% endif %}<br>headless: {{ a.capability.headless }} · structured: {{ a.capability.structured_output }}<br>verified on host: {{ a.capability.verified }} · identity isolation: {{ a.capability.isolated_identity }}{% else %}<span class="muted">not detected yet</span>{% endif %}</div>
 <div><div class="muted">Authentication</div>{{ a.auth.state }}{% if a.auth.method %} ({{ a.auth.method }}){% endif %}</div>
 <div><div class="muted">Usage (measured)</div>24h: {{ a.usage.last_24h }} · 7d: {{ a.usage.last_7d }} · reviews 24h: {{ a.usage.reviews_24h }}<br>total {{ a.usage.total }} calls, {{ a.usage.duration_s }}s, limit errors {{ a.usage.limit_errors }}<br>tokens (when reported): {{ a.usage.input_tokens or '—' }}/{{ a.usage.output_tokens or '—' }}</div>

@@ -1,8 +1,10 @@
 {% extends "base.html" %}
+{% block title %}Dự án · AgentBridge{% endblock %}
 {% block body %}
-<h1>Projects</h1>
-<div class="card scroll"><table><tr><th>Project</th><th>Repository</th><th>Base</th><th>Milestones</th><th>Open tasks</th><th>State</th></tr>
-{% for p in projects %}<tr><td><a href="/projects/{{ p.slug }}">{{ p.name }}</a><div class="muted">{{ p.slug }}</div></td><td><code>{{ p.repo_path }}</code><div class="muted">{{ p.remote_url or 'no remote' }}</div></td><td>{{ p.base_branch }}</td><td>{{ p.nm }}</td><td>{{ p.open }}</td><td>{{ 'paused' if p.paused else 'active' }}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">No projects. Register one with <code>agentbridge project add manifest.yaml</code>.</td></tr>{% endfor %}
+<h1>Dự án</h1>
+<p class="sub">Các repo AgentBridge đang quản lý.</p>
+<div class="card scroll"><table><tr><th>Dự án</th><th>Repo</th><th>Nhánh gốc</th><th>Milestone</th><th>Task đang mở</th><th>Trạng thái</th></tr>
+{% for p in projects %}<tr><td><a href="/projects/{{ p.slug }}"><b>{{ p.name }}</b></a><div class="muted small">{{ p.slug }}</div></td><td><code>{{ p.repo_path }}</code><div class="muted small">{{ p.remote_url or 'không có remote' }}</div></td><td>{{ p.base_branch }}</td><td>{{ p.nm }}</td><td>{{ p.open }}</td><td><span class="chip {{ 'warn' if p.paused else 'ok' }}">{{ 'tạm dừng' if p.paused else 'đang chạy' }}</span></td></tr>
+{% else %}<tr><td colspan="6" class="muted">Chưa có dự án. Đăng ký bằng <code>agentbridge project add manifest.yaml</code>.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

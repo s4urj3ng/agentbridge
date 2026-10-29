@@ -6,7 +6,9 @@ This process never executes agents. It reads state and writes owner intents
 Auth: every route except /api/health, /login and /webhooks/github requires
 either `Authorization: Bearer $AGENTBRIDGE_ADMIN_TOKEN` or a signed session
 cookie obtained by logging in with that token. Cookie-authenticated POSTs must
-carry a CSRF token. Bind to 127.0.0.1 and reach it via Tailscale.
+carry a CSRF token. Bind to 127.0.0.1 and reach it via Tailscale, or publish it
+through a Cloudflare Tunnel (docs/DASHBOARD.md): failed logins are throttled per
+client IP and the session cookie is marked Secure behind an HTTPS proxy.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .dashboard import views
 from .db import audit, connect, jload, migrate, now_iso, row, rows, tx
 from .integrations.github import record_delivery, verify_signature
 from .orchestrator import events as evq
@@ -33,6 +36,12 @@ from .policies.safety import PolicyViolation, read_confined, redact
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "dashboard" / "templates"))
 SESSION_TTL = 12 * 3600
+LOGIN_WINDOW_S, LOGIN_MAX_FAILURES = 15 * 60, 5     # per client IP
+SECURITY_HEADERS = {"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
+                    "Referrer-Policy": "same-origin",
+                    "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                               "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                                               "frame-ancestors 'none'; form-action 'self'"}
 
 
 class GoalIn(BaseModel):
@@ -53,6 +62,37 @@ def create_app(settings: Settings) -> FastAPI:
     engine = Engine(settings, conn)   # used for DB-only owner operations; never .run() here
     engine.sync_agents()
     secret = settings.session_secret.encode()
+    clock = views.Clock((settings.telegram or {}).get("timezone", "Asia/Seoul"))
+    TEMPLATES.env.globals.update(t=clock, until=clock.until, STATE_VI=views.STATE_VI, BUCKET_VI=views.BUCKET_VI)
+    failures: dict[str, list[float]] = {}
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            resp.headers.setdefault(k, v)
+        if is_https(request):
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return resp
+
+    def is_https(request: Request) -> bool:
+        # cloudflared / a local reverse proxy terminates TLS and connects to 127.0.0.1
+        return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+
+    def client_ip(request: Request) -> str:
+        return (request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?"))[:64]
+
+    def throttled(ip: str) -> bool:
+        now = time.time()
+        if len(failures) > 10_000:          # many rotating IPs: drop entries outside the window
+            for k in [k for k, v in failures.items() if not v or now - v[-1] >= LOGIN_WINDOW_S]:
+                del failures[k]
+        recent = [x for x in failures.get(ip, []) if now - x < LOGIN_WINDOW_S]
+        if recent:
+            failures[ip] = recent
+        else:
+            failures.pop(ip, None)
+        return len(recent) >= LOGIN_MAX_FAILURES
 
     # ------------------------------------------------------------ auth
     def sign(value: str) -> str:
@@ -88,7 +128,9 @@ def create_app(settings: Settings) -> FastAPI:
 
     def page(request: Request, name: str, **ctx: Any) -> HTMLResponse:
         cookie = request.cookies.get("ab_session", "")
-        ctx.update(request=request, csrf=csrf_for(cookie) if cookie else "", nav=name.split(".")[0])
+        ctx.update(request=request, csrf=csrf_for(cookie) if cookie else "", nav=name.split(".")[0],
+                   pending=row(conn, "SELECT COUNT(*) c FROM approval_requests WHERE status='PENDING'")["c"],
+                   engine_up=health()["engine_running"])
         return TEMPLATES.TemplateResponse(request, name, ctx)
 
     def q(sql: str, *a) -> list[dict]:
@@ -116,15 +158,22 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/login")
     def login(request: Request, token: str = Form(...)):
+        ip = client_ip(request)
+        if throttled(ip):
+            return TEMPLATES.TemplateResponse(request, "login.html", {
+                "request": request, "nav": "login",
+                "error": "Sai quá nhiều lần. Thử lại sau 15 phút."}, status_code=429)
         if not settings.admin_token or not hmac.compare_digest(token, settings.admin_token):
+            failures.setdefault(ip, []).append(time.time())
             with tx(conn):
-                audit(conn, "anonymous", "auth.login_failed", ip=request.client.host if request.client else "?")
-            return TEMPLATES.TemplateResponse(request, "login.html", {"request": request, "error": "Invalid token",
+                audit(conn, "anonymous", "auth.login_failed", ip=ip)
+            return TEMPLATES.TemplateResponse(request, "login.html", {"request": request, "error": "Sai token",
                                                                       "nav": "login"}, status_code=401)
+        failures.pop(ip, None)
         exp = str(int(time.time()) + SESSION_TTL)
         resp = RedirectResponse("/", status_code=303)
         resp.set_cookie("ab_session", f"{exp}.{sign('admin:' + exp)}", httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", max_age=SESSION_TTL)
+                        secure=is_https(request), max_age=SESSION_TTL)
         return resp
 
     @app.post("/logout")
@@ -393,15 +442,8 @@ def create_app(settings: Settings) -> FastAPI:
     # ------------------------------------------------------------ dashboard
     @app.get("/", response_class=HTMLResponse)
     def overview(request: Request, actor: str = Depends(auth)):
-        return page(request, "overview.html", status=engine.status(), agents=agents_view(),
-                    running=q("SELECT t.id, t.key, t.state, t.assignee, p.slug FROM tasks t JOIN projects p "
-                              "ON p.id=t.project_id WHERE t.state IN ('DISPATCHED','RUNNING','VALIDATING') ORDER BY t.id"),
-                    blocked=q("SELECT t.id, t.key, t.blocked_reason, p.slug FROM tasks t JOIN projects p ON p.id=t.project_id "
-                              "WHERE t.state='BLOCKED' ORDER BY t.id DESC LIMIT 20"),
-                    queue=row(conn, "SELECT COUNT(*) c FROM tasks WHERE state IN ('CREATED','QUEUED')")["c"],
-                    projects=q("SELECT * FROM projects ORDER BY id"),
-                    events=q("SELECT * FROM audit_log ORDER BY id DESC LIMIT 30"),
-                    health=health())
+        return page(request, "overview.html", cards=views.progress_cards(conn), groups=views.quota_groups(conn),
+                    activity=views.activity(conn), counts=views.counters(conn))
 
     @app.get("/projects", response_class=HTMLResponse)
     def projects_page(request: Request, actor: str = Depends(auth)):
@@ -418,6 +460,7 @@ def create_app(settings: Settings) -> FastAPI:
         ms = q("SELECT * FROM milestones WHERE project_id=? ORDER BY id DESC", p["id"])
         for m_ in ms:
             m_["tasks"] = q("SELECT * FROM tasks WHERE milestone_id=? ORDER BY id", m_["id"])
+            m_["progress"] = views.milestone_progress(conn, m_["id"])
             m_["graph"] = dep_graph_svg(m_["id"])
         manifest = jload(p["manifest_json"], {})
         return page(request, "project.html", p=dict(p), milestones=ms, manifest=manifest,
@@ -456,7 +499,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/agents", response_class=HTMLResponse)
     def agents_page(request: Request, actor: str = Depends(auth)):
-        return page(request, "agents.html", agents=agents_view())
+        return page(request, "agents.html", agents=agents_view(), groups=views.quota_groups(conn))
 
     @app.post("/agents/{agent_id}/{action}")
     async def agent_form(request: Request, agent_id: str, action: str, actor: str = Depends(auth)):

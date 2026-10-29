@@ -1,0 +1,44 @@
+{% macro progress(pr, big=true) %}
+<div class="bar" style="{{ '' if big else 'height:7px' }}" title="{{ pr.done }}/{{ pr.total }} task xong">
+  {% for b in ['done', 'running', 'review', 'revising', 'blocked'] %}{% if pr.buckets[b] %}<span class="{{ b }}" style="width:{{ 100 * pr.buckets[b] / pr.total }}%"></span>{% endif %}{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro legend(pr) %}
+<div class="legend">
+  {% for b, n in pr.buckets.items() %}{% if n %}<span><i class="b-{{ b }}"></i>{{ n }} {{ BUCKET_VI[b] }}</span>{% endif %}{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro task_row(task) %}
+<li>
+  <span class="ic b-{{ task.bucket }}"></span>
+  <a class="key" href="/tasks/{{ task.id }}">{{ task.key }}</a>
+  <span class="title muted small" title="{{ task.title }}">{{ task.title }}</span>
+  <span class="meta">
+    {% if task.revision_count and task.bucket != 'done' %}<span class="chip warn">sửa lần {{ task.revision_count }}</span>{% endif %}
+    {% if task.bucket == 'running' %}<span class="chip info">{{ task.assignee }}</span>
+    {% elif task.bucket == 'review' %}<span class="chip review">{{ task.reviewer or 'reviewer' }}</span>
+    {% elif task.bucket == 'blocked' %}<span class="chip bad" title="{{ task.blocked_reason or '' }}">bị chặn</span>
+    {% else %}<span class="chip {{ 'ok' if task.bucket == 'done' }}">{{ STATE_VI.get(task.state, task.state) }}</span>{% endif %}
+  </span>
+</li>
+{% endmacro %}
+
+{% macro quota_agent(a) %}
+<div class="agent">
+  <div class="head">
+    <b>{{ a.id }}</b><span class="muted small">{{ a.model or a.provider }}</span>
+    <span class="chip {{ 'ok' if a.state == 'ok' else ('warn' if a.state in ('provider_stop', 'paused') else 'bad') }}">{{ a.state_vi }}{% if a.until %} · đến {{ t(a.until) }}{% endif %}</span>
+    {% if a.running %}<span class="chip info">{{ a.running }}/{{ a.max_concurrency }} đang chạy</span>{% endif %}
+  </div>
+  {% for w in a.provider_windows %}
+  <div class="win">
+    <span class="muted">{{ w.label }}</span>
+    {% if w.left_pct is none %}<div class="mbar"><span style="width:0"></span></div><span class="pct">{{ 'đã reset' if w.stale else '—' }}</span>
+    {% else %}<div class="mbar {{ 'low' if w.left_pct < 15 else ('mid' if w.left_pct < 40 else '') }}"><span style="width:{{ w.left_pct }}%"></span></div>
+    <span class="pct">còn {{ w.left_pct }}%{% if w.resets_at %} · {{ until(w.resets_at) }}{% endif %}</span>{% endif %}
+  </div>
+  {% else %}<div class="muted small" style="margin-top:4px">Nhà cung cấp chưa báo số quota.</div>{% endfor %}
+</div>
+{% endmacro %}

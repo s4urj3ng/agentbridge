@@ -1,48 +1,135 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>{% block title %}AgentBridge{% endblock %}</title>
 <style>
-:root{--bg:#f7f7f5;--panel:#fff;--fg:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--accent:#2f5bd3;--ok:#1f7a3d;--warn:#a46200;--bad:#b3261e;--code:#f0efea}
-@media (prefers-color-scheme: dark){:root{--bg:#141413;--panel:#1d1d1b;--fg:#ecebe6;--muted:#9c9b94;--line:#33322e;--accent:#7ea0ff;--ok:#5cc27e;--warn:#e0a24a;--bad:#ff8a80;--code:#262522}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-header{display:flex;gap:18px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
-header b{font-size:15px}header nav{display:flex;gap:4px;flex-wrap:wrap}header nav a{padding:5px 10px;border-radius:6px;color:var(--fg);text-decoration:none}
-header nav a.on{background:var(--code)}header form{margin-left:auto}
-main{max-width:1200px;margin:0 auto;padding:16px}
-h1{font-size:20px;margin:4px 0 14px}h2{font-size:15px;margin:18px 0 8px}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto}
-.kpi{font-size:24px;font-weight:600}.muted{color:var(--muted)}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+:root{
+  --bg:#f5f6f8;--panel:#ffffff;--panel2:#f0f2f5;--fg:#16181d;--muted:#6a7180;--line:#e3e6eb;
+  --accent:#3b6cf6;--accent-soft:#e6edff;--ok:#18864b;--ok-soft:#e3f5ea;--warn:#a86400;--warn-soft:#fdf1dc;
+  --bad:#c0362c;--bad-soft:#fde7e5;--rev:#7a4fd6;--rev-soft:#efe8fd;--track:#e6e8ec;--shadow:0 1px 2px rgba(16,24,40,.05);
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0f1115;--panel:#171a21;--panel2:#1d2129;--fg:#e8eaee;--muted:#8d95a3;--line:#262b35;
+  --accent:#7d9dff;--accent-soft:#1c2747;--ok:#4cc985;--ok-soft:#14301f;--warn:#f0b04f;--warn-soft:#3a2a10;
+  --bad:#ff7b70;--bad-soft:#3d1916;--rev:#b195ff;--rev-soft:#2a2045;--track:#262b35;--shadow:none;
+}}
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{margin:0;color:var(--fg);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+header.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:16px;padding:10px 20px;
+  background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:8px;font-weight:650;font-size:15px;color:var(--fg)}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--bad)}.brand .dot.up{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+nav.tabs{display:flex;gap:2px;flex-wrap:wrap}
+nav.tabs a{padding:6px 11px;border-radius:7px;color:var(--muted);font-weight:500}
+nav.tabs a:hover{background:var(--panel2);color:var(--fg);text-decoration:none}
+nav.tabs a.on{background:var(--accent-soft);color:var(--accent)}
+.badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;border-radius:99px;background:var(--bad);color:#fff;font-size:11px;line-height:18px;text-align:center}
+.top .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
+main{max-width:1240px;margin:0 auto;padding:20px}
+h1{font-size:21px;margin:0 0 4px;font-weight:650}h2{font-size:15px;margin:26px 0 10px;font-weight:600}
+.sub{color:var(--muted);margin:0 0 18px}
+.muted{color:var(--muted)}.small{font-size:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px}.grid>*{min-width:0}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.cols{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.kpi .label{color:var(--muted);font-size:12px}.kpi .num{font-size:26px;font-weight:650;line-height:1.2;margin-top:2px}
+.two{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+@media (max-width:900px){.two{grid-template-columns:1fr}}
+.bar{height:10px;border-radius:99px;background:var(--track);overflow:hidden;display:flex}
+.bar span{display:block;height:100%}
+.bar .done{background:var(--ok)}.bar .running{background:var(--accent)}.bar .review{background:var(--rev)}
+.bar .revising{background:var(--warn)}.bar .blocked{background:var(--bad)}.bar .waiting{background:transparent}
+.mbar{height:6px;border-radius:99px;background:var(--track);overflow:hidden}.mbar span{display:block;height:100%;background:var(--ok)}
+.mbar.mid span{background:var(--warn)}.mbar.low span{background:var(--bad)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 4px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:500;background:var(--panel2);color:var(--muted);white-space:nowrap}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}.chip.info{background:var(--accent-soft);color:var(--accent)}
+.chip.review{background:var(--rev-soft);color:var(--rev)}
+.b-done{background:var(--ok)}.b-running{background:var(--accent)}.b-review{background:var(--rev)}.b-revising{background:var(--warn)}.b-blocked{background:var(--bad)}.b-waiting{background:var(--track)}
+.tasks{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:2px}
+.tasks li{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px}
+.tasks li:hover{background:var(--panel2)}
+.tasks .ic{width:8px;height:8px;border-radius:50%;flex:none}
+.tasks .key{font-weight:550;flex:none}.tasks .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tasks .meta{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.feed{list-style:none;margin:0;padding:0;max-height:640px;overflow:auto}
+.feed li{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.feed li:last-child{border-bottom:0}
+.feed time{color:var(--muted);font-size:12px;min-width:40px;font-variant-numeric:tabular-nums}
+.feed .k{width:3px;border-radius:3px;flex:none;background:var(--track)}
+.feed .k.ok{background:var(--ok)}.feed .k.bad{background:var(--bad)}.feed .k.warn{background:var(--warn)}.feed .k.review{background:var(--rev)}.feed .k.info{background:var(--accent)}
+.qgroup+.qgroup{margin-top:16px}
+.qgroup h3{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}
+.agent{padding:10px 0;border-top:1px solid var(--line)}.qgroup .agent:first-of-type{border-top:0;padding-top:0}
+.agent .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.agent .head b{font-weight:600}
+.win{display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:center;margin-top:6px;font-size:12px}
+.win .pct{text-align:right;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{font-weight:600;color:var(--muted);font-size:12px}
-pre{background:var(--code);padding:10px;border-radius:6px;overflow:auto;max-height:420px;font-size:12px;white-space:pre-wrap;word-break:break-word}
-a{color:var(--accent)}button,input,textarea,select{font:inherit;color:inherit}
-button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
-button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button.danger{color:var(--bad)}
-input,textarea,select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
-textarea{width:100%;min-height:70px}
-.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--code)}
-.st-COMPLETED,.st-APPROVED,.ok{color:var(--ok)}.st-BLOCKED,.st-FAILED,.bad{color:var(--bad)}.st-RUNNING,.st-VALIDATING,.st-DISPATCHED,.warn{color:var(--warn)}
-.inline{display:inline}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+pre{background:var(--panel2);padding:12px;border-radius:8px;overflow:auto;max-height:440px;white-space:pre-wrap;word-break:break-word}
+button,input,textarea,select{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:500}
+button:hover{background:var(--panel2)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button.primary:hover{filter:brightness(1.07)}
+button.danger{color:var(--bad)}
+input,textarea,select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+input:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+textarea{width:100%;min-height:80px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.inline{display:inline}
+.scroll{overflow-x:auto}.empty{color:var(--muted);padding:6px 0}
+.st-COMPLETED,.st-APPROVED,.ok{color:var(--ok)}.st-BLOCKED,.st-FAILED,.bad{color:var(--bad)}
+.st-RUNNING,.st-VALIDATING,.st-DISPATCHED,.warn{color:var(--warn)}.st-REVIEW_PENDING{color:var(--rev)}
 svg.graph{max-width:100%;height:auto}svg .edge{fill:none;stroke:var(--muted);stroke-width:1.5}
 svg rect.node{fill:var(--panel);stroke:var(--line);stroke-width:1.5}svg rect.st-COMPLETED{stroke:var(--ok)}svg rect.st-BLOCKED,svg rect.st-FAILED{stroke:var(--bad)}
 svg rect.st-RUNNING,svg rect.st-VALIDATING,svg rect.st-REVIEW_PENDING{stroke:var(--warn)}svg text{fill:var(--fg);font-size:12px}svg text.ns{fill:var(--muted);font-size:11px}
-.scroll{overflow-x:auto}
+@media (max-width:640px){main{padding:14px}.tasks .title{display:none}.tasks li{flex-wrap:wrap}.feed li{flex-wrap:wrap}header.top{padding:10px 14px}.top .right{width:100%;margin-left:0}.win{grid-template-columns:28px 1fr auto}}
 </style>
 </head>
 <body>
-<header>
-  <b>AgentBridge</b>
-  <nav>
-    {% for href, label, key in [("/", "Overview", "overview"), ("/projects", "Projects", "projects"), ("/agents", "Agents", "agents"), ("/approvals", "Approvals", "approvals"), ("/settings", "Settings", "settings")] %}
-    <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task')) else '' }}">{{ label }}</a>
+<header class="top">
+  <a class="brand" href="/"><span class="dot {{ 'up' if engine_up }}" title="engine {{ 'đang chạy' if engine_up else 'đang dừng' }}"></span>AgentBridge</a>
+  {% if nav != 'login' %}
+  <nav class="tabs">
+    {% for href, label, key in [("/", "Tổng quan", "overview"), ("/projects", "Dự án", "projects"), ("/agents", "Agent & quota", "agents"), ("/approvals", "Chờ duyệt", "approvals"), ("/settings", "Cài đặt", "settings")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task')) else '' }}">{{ label }}{% if key == 'approvals' and pending %}<span class="badge">{{ pending }}</span>{% endif %}</a>
     {% endfor %}
   </nav>
-  {% if csrf %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Log out</button></form>{% endif %}
+  <div class="right">
+    <span id="live-at"></span>
+    {% if csrf %}<form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Đăng xuất</button></form>{% endif %}
+  </div>
+  {% endif %}
 </header>
-<main>{% block body %}{% endblock %}</main>
+<main id="live-root">{% block body %}{% endblock %}</main>
+<script>
+// Pages that call liveRefresh(seconds) re-render in place; paused while you type in a field.
+function liveRefresh(sec){
+  const at=document.getElementById('live-at');
+  const stamp=()=>{if(at)at.textContent='cập nhật '+new Date().toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})};
+  stamp();
+  setInterval(async()=>{
+    const a=document.activeElement;
+    if(document.hidden||(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))return;
+    try{
+      const r=await fetch(location.href,{credentials:'same-origin'});
+      if(!r.ok||r.redirected){if(r.redirected)location.reload();return}
+      const doc=new DOMParser().parseFromString(await r.text(),'text/html');
+      const fresh=doc.getElementById('live-root');if(!fresh)return;
+      const y=window.scrollY;document.getElementById('live-root').innerHTML=fresh.innerHTML;window.scrollTo(0,y);
+      const b=doc.querySelector('.brand .dot');if(b)document.querySelector('.brand .dot').className=b.className;
+      stamp();
+    }catch(e){}
+  },sec*1000);
+}
+</script>
+{% block live %}{% endblock %}
 </body>
 </html>
