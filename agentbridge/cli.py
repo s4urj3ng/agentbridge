@@ -85,6 +85,13 @@ def cmd_milestone(args):
         r = found[0] if found else None
     if r is None:
         sys.exit(f"unknown milestone {args.id_or_key!r}")
+    if args.action == "next":
+        try:
+            e.plan_next_milestone(r["id"], "owner:cli")
+        except ValueError as ex:
+            sys.exit(str(ex))
+        print(f"Tech Lead asked to plan the milestone after {args.id_or_key}")
+        return
     try:
         keys = e.cancel_milestone(r["id"], "owner:cli", args.reason)
     except ValueError as ex:
@@ -306,7 +313,7 @@ def main(argv: list[str] | None = None) -> None:
     x.add_argument("--milestone"); x.set_defaults(fn=cmd_goal)
     x = sub.add_parser("note", help="standing instruction to the project's Tech Lead")
     x.add_argument("project"); x.add_argument("text", help='note text, or "-" for stdin'); x.set_defaults(fn=cmd_note)
-    x = sub.add_parser("milestone"); x.add_argument("action", choices=["cancel"]); x.add_argument("id_or_key")
+    x = sub.add_parser("milestone"); x.add_argument("action", choices=["cancel", "next"]); x.add_argument("id_or_key")
     x.add_argument("--project"); x.add_argument("--reason", default="cancelled by owner")
     x.set_defaults(fn=cmd_milestone)
     x = sub.add_parser("run", help="host worker: execute the orchestration loop")

@@ -38,7 +38,7 @@ from ..workers.validation import run_validation
 from . import events as evq
 from . import overrides, quota
 from .context import build_review_prompt, build_tech_lead_prompt, build_worker_prompt
-from .decisions import (DecisionEnvelope, MalformedDecision, ReviewResult, WorkerResult, envelope_json_schema,
+from .decisions import (PLANNING_DECISIONS, DecisionEnvelope, MalformedDecision, ReviewResult, WorkerResult, envelope_json_schema,
                         parse_envelope, review_result_schema, worker_result_schema)
 from .states import ALLOWED, TERMINAL, InvalidTransition, StaleTransition, TaskState as S, transition
 
@@ -326,6 +326,16 @@ class Engine:
                 keys.append(ms["key"])
             audit(self.conn, actor, "owner.note", project_id=p["id"], milestones=keys, note=text[:300])
         return keys
+
+    def plan_next_milestone(self, milestone_id: int, actor: str) -> None:
+        """Owner trigger: ask the Tech Lead to plan the milestone after a completed one (works without auto_next)."""
+        ms = row(self.conn, "SELECT * FROM milestones WHERE id=?", milestone_id)
+        if ms is None or ms["status"] != "COMPLETED":
+            raise ValueError("only a COMPLETED milestone can be followed by a planned one")
+        with tx(self.conn):
+            evq.emit(self.conn, "PLAN_NEXT_MILESTONE", project_id=ms["project_id"], milestone_id=ms["id"],
+                     payload={"completed": ms["key"], "manual": True}, dedupe_key=f"next:{ms['id']}:{now_iso()}")
+            audit(self.conn, actor, "milestone.plan_next", project_id=ms["project_id"], milestone=ms["key"])
 
     def cancel_milestone(self, milestone_id: int, actor: str, reason: str = "cancelled by owner") -> list[str]:
         """Cancel a milestone: open tasks → CANCELLED (running workers are stopped), pending approvals
@@ -690,10 +700,21 @@ class Engine:
         milestone = row(self.conn, "SELECT * FROM milestones WHERE id=?", ev["milestone_id"])
         m = self.manifest(project["id"])
         lim = self._limits(m)
-        if milestone is None or milestone["status"] in ("COMPLETED", "CANCELLED"):
+        planning = ev["type"] == "PLAN_NEXT_MILESTONE"
+        if milestone is None or (milestone["status"] in ("COMPLETED", "CANCELLED") and not planning):
             with tx(self.conn):
                 evq.finish(self.conn, ev["id"], "DONE", "milestone not active")
             return
+        extra = None
+        if planning:
+            busy_ms = row(self.conn, "SELECT key FROM milestones WHERE project_id=? AND status IN "
+                                     "('ACTIVE','AWAITING_APPROVAL','BLOCKED')", project["id"])
+            if busy_ms or not (m.policy.auto_next or jload(ev["payload_json"], {}).get("manual")):
+                with tx(self.conn):
+                    evq.finish(self.conn, ev["id"], "DONE",
+                               f"milestone {busy_ms['key']} already open" if busy_ms else "auto_next disabled")
+                return
+            extra = await asyncio.to_thread(self._next_milestone_material, project, milestone, m)
         if ev["type"] == "GOAL_SUBMITTED":
             await asyncio.to_thread(self._ensure_integration_branch_sync, project, milestone, m)
             milestone = row(self.conn, "SELECT * FROM milestones WHERE id=?", ev["milestone_id"])
@@ -717,7 +738,7 @@ class Engine:
                       "validation_names": list(m.validation.commands), "autonomous": m.policy.autonomous},
             agents=self._agent_roster(m), limits={k: lim[k] for k in ("max_task_depth", "max_tasks_per_milestone",
                                                                         "max_revisions")},
-            previous_rejection=ev["error"] if ev["attempts"] > 1 else None)
+            previous_rejection=ev["error"] if ev["attempts"] > 1 else None, extra=extra)
         with tx(self.conn):
             self.conn.execute("UPDATE milestones SET tl_invocations=tl_invocations+1 WHERE id=?", (milestone["id"],))
         lead_cfg = jload(row(self.conn, "SELECT config_json FROM agents WHERE id=?", lead)["config_json"], {})
@@ -821,6 +842,30 @@ class Engine:
 
     def _apply_one(self, d, ev, project, milestone, m: Manifest, lim: dict, roster: dict) -> None:
         denied = m.policy.denied_categories()
+        planning = bool(ev) and ev["type"] == "PLAN_NEXT_MILESTONE"
+        if planning and d.type not in PLANNING_DECISIONS and not (
+                d.type == "REQUEST_HUMAN_APPROVAL" and d.action == "scope_change"):
+            raise PolicyViolation("this event only accepts PROPOSE_MILESTONE or NO_FURTHER_WORK")
+        if d.type in PLANNING_DECISIONS and not planning:
+            raise PolicyViolation(f"{d.type} is only valid when planning the next milestone")
+        if d.type == "PROPOSE_MILESTONE":
+            since = now_iso(-86400)
+            made = row(self.conn, "SELECT COUNT(*) c FROM audit_log WHERE project_id=? AND action='milestone.auto_create' "
+                                  "AND created_at >= ?", project["id"], since)["c"]
+            if made >= m.policy.auto_next_max_per_day:
+                raise PolicyViolation(f"auto_next cap reached ({made}/{m.policy.auto_next_max_per_day} in 24 h); "
+                                      "use NO_FURTHER_WORK")
+            if row(self.conn, "SELECT 1 FROM milestones WHERE project_id=? AND key=?", project["id"], d.key):
+                raise PolicyViolation(f"milestone key {d.key!r} already exists")
+            new_id = self.submit_goal(project["slug"], d.goal, d.key, actor="tech_lead")
+            audit(self.conn, "tech_lead", "milestone.auto_create", project_id=project["id"], milestone=d.key,
+                  after=milestone["key"], milestone_id=new_id)
+            return
+        if d.type == "NO_FURTHER_WORK":
+            self._add_context(project["id"], "note", f"Auto-planning stopped after {milestone['key']}: {d.reason[:500]}")
+            audit(self.conn, "tech_lead", "milestone.auto_stop", project_id=project["id"], after=milestone["key"],
+                  reason=d.reason[:500])
+            return
         if d.type == "CREATE_TASKS":
             existing = row(self.conn, "SELECT COUNT(*) c FROM tasks WHERE milestone_id=?", milestone["id"])["c"]
             if existing + len(d.tasks) > lim["max_tasks_per_milestone"]:
@@ -962,6 +1007,9 @@ class Engine:
                               (d.summary, now_iso(), milestone["id"]))
             self._add_context(project["id"], "verified_fact", f"Milestone {milestone['key']} completed: {d.summary[:300]}")
             audit(self.conn, "tech_lead", "milestone.complete", project_id=project["id"], milestone=milestone["key"])
+            if m.policy.auto_next:
+                evq.emit(self.conn, "PLAN_NEXT_MILESTONE", project_id=project["id"], milestone_id=milestone["id"],
+                         payload={"completed": milestone["key"]}, dedupe_key=f"next:{milestone['id']}")
             if m.policy.draft_pr != "never":
                 self._request_approval(project["id"], "create_draft_pr",
                                        f"Open a draft PR for {milestone['integration_branch']} → {project['base_branch']}",
@@ -1171,6 +1219,9 @@ class Engine:
         except GitError as e:
             log.warning("fetch failed: %s", e)
         base = ws.approved_base(project["base_branch"])
+        stacked_on = self._unmerged_previous_branch(ws, project, milestone, m, base) if m.policy.stack_on_unmerged else None
+        if stacked_on:
+            base = ws.resolve(f"refs/heads/{stacked_on}")
         branch = f"agentbridge/{project['slug']}/{slugify(milestone['key'])}/integration"
         path = self.s.workspaces_dir / project["slug"] / f"{slugify(milestone['key'])}-integration"
         ws.create_worktree(path, branch, base)
@@ -1179,6 +1230,52 @@ class Engine:
                               (branch, base, milestone["id"]))
             self.conn.execute("INSERT INTO git_refs (project_id, milestone_id, ref_name, sha, kind, created_at) VALUES "
                               "(?,?,?,?,?,?)", (project["id"], milestone["id"], branch, base, "base", now_iso()))
+            if stacked_on:
+                self._add_context(project["id"], "note", f"Milestone {milestone['key']} is stacked on the unmerged "
+                                                         f"branch {stacked_on} ({base[:12]}).")
+                audit(self.conn, "engine", "milestone.stacked", project_id=project["id"], milestone=milestone["key"],
+                      on=stacked_on, sha=base)
+
+    def _unmerged_previous_branch(self, ws: GitWorkspace, project, milestone, m: Manifest, base_sha: str) -> str | None:
+        """Integration branch of the latest completed milestone, if its work is not in the base yet.
+
+        Uses GitWorkspace.is_integrated, so a squash-merged previous milestone counts as merged.
+        """
+        prev = row(self.conn, "SELECT integration_branch FROM milestones WHERE project_id=? AND id<? AND "
+                              "status='COMPLETED' AND integration_branch IS NOT NULL ORDER BY id DESC LIMIT 1",
+                   project["id"], milestone["id"])
+        if not prev or not ws.branch_exists(prev["integration_branch"]):
+            return None
+        return None if ws.is_integrated(prev["integration_branch"], base_sha) else prev["integration_branch"]
+
+    def _next_milestone_material(self, project, milestone, m: Manifest, budget: int = 12_000) -> str:
+        """Hand-over files from the completed milestone's integration head, for planning the next one."""
+        from .context import fence
+        ws = self.workspace(project, m)
+        ref = milestone["integration_branch"]
+        if not ref or not ws.branch_exists(ref):
+            return ""
+        try:
+            changed = git(ws.repo, "diff", "--name-only", f"{milestone['base_ref']}..{ref}").splitlines() \
+                if milestone["base_ref"] else []
+        except GitError:
+            changed = []
+        wanted = [p for p in changed if "NEXT" in p.upper() or "QUESTION" in p.upper()]
+        wanted += [p for p in ("docs/HANDOFF.md", "docs/PROJECT_STATE.md") if p not in wanted]
+        parts, used = [], 0
+        for path in wanted:
+            try:
+                text = git(ws.repo, "show", f"{ref}:{path}")
+            except GitError:
+                continue
+            text = text[: max(0, min(6000, budget - used))]
+            if not text:
+                break
+            used += len(text)
+            parts.append(fence(f"{path} @ {ref}", text, 6500))
+        summary = f"## Completed milestone {milestone['key']}\nSummary: {(milestone['summary'] or '')[:2000]}\n" \
+                  f"Files changed: {len(changed)}"
+        return "\n\n".join([summary, *parts])
 
     def _prepare_task_worktree_sync(self, t, project, milestone, m: Manifest) -> tuple[Path, str, str]:
         ws = self.workspace(project, m)

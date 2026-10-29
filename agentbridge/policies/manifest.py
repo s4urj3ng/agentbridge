@@ -56,6 +56,13 @@ class PolicySection(_Strict):
     # True: the owner pre-authorises the Tech Lead to keep a milestone moving on its own (retry,
     # revise, reassign, review) instead of asking; only scope changes still go to the owner.
     autonomous: bool = False
+    # True: when a milestone completes, the Tech Lead plans and starts the next one itself
+    # (PROPOSE_MILESTONE) or stops with NO_FURTHER_WORK. Bounded by auto_next_max_per_day.
+    auto_next: bool = False
+    auto_next_max_per_day: int = 4
+    # True: a new milestone starts from the previous milestone's integration branch while that
+    # branch is not yet merged into the base branch (stacked work), instead of from the base.
+    stack_on_unmerged: bool = True
     draft_pr: Literal["never", "approval", "auto"] = "approval"
     protected_branches: list[str] = Field(default_factory=list)
     max_changed_files: int = 50

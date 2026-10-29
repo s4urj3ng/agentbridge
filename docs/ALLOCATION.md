@@ -117,6 +117,31 @@ Limits still bound the loop (`max_revisions`, `max_execution_failures`,
 still need approval, and hard policy is unchanged. G3X Lite runs this way since 2026-10-28, with
 `review_policy: always`.
 
+### Continuing on its own (`policy.auto_next`)
+
+With `auto_next: true`, completing a milestone emits `PLAN_NEXT_MILESTONE`. The Tech Lead gets the
+completed milestone's summary, the recently completed milestones, the project context and the
+hand-over files from its integration head (changed files whose names contain `NEXT` or
+`QUESTION`, plus `docs/HANDOFF.md` and `docs/PROJECT_STATE.md`, fenced as untrusted, at most 12 KB).
+It answers with exactly one decision:
+
+- `PROPOSE_MILESTONE {key, goal}`: the milestone is created and started at once (`auto_start`). The
+  goal passes the same hardware no-go check as an owner goal, and the key must be new.
+- `NO_FURTHER_WORK {reason}`: auto-planning stops and the reason goes into the project context.
+  `REQUEST_HUMAN_APPROVAL` with `scope_change` is also accepted.
+
+Guards: at most `auto_next_max_per_day` (default 4) auto-created milestones per 24 h. Planning only
+runs when no other milestone of the project is open. Planning decisions are refused on any other
+event, and other decisions are refused while planning. With `stack_on_unmerged: true` (default),
+a new milestone starts from the previous milestone's integration branch while that branch is not
+yet in the base branch (`is_integrated`, so squash merges count). Unmerged draft PRs therefore
+never cause work to be redone. The owner can also ask for a plan after any completed milestone,
+even without `auto_next`:
+
+```bash
+agentbridge milestone next PORT-13-OFFLINE --project g3x-lite
+```
+
 Owner commands:
 
 ```bash

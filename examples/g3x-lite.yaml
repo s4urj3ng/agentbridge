@@ -41,6 +41,11 @@ policy:
   hardware_no_go: [firmware_flashing, camera_operations, sd_card_writing, boot_manipulation, firmware_deployment, hardware_trial]
   auto_start: true
   autonomous: true
+  # When a milestone completes, the Tech Lead plans and starts the next one (or stops with
+  # NO_FURTHER_WORK). New milestones stack on the previous integration branch until it is merged.
+  auto_next: true
+  auto_next_max_per_day: 6
+  stack_on_unmerged: true
   draft_pr: approval
   # chdk-port/** is firmware-side source (boot_prototype.c, stubs): read-only for offline milestones.
   # AGENTS.md is the owner's agent contract: agents never edit it. Relax only by owner decision.

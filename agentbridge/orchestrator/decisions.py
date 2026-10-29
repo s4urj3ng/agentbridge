@@ -88,8 +88,23 @@ class RequestHumanApproval(_D):
     task_id: int | None = None
 
 
+class ProposeMilestone(_D):
+    """Only valid for PLAN_NEXT_MILESTONE events (policy.auto_next)."""
+    type: Literal["PROPOSE_MILESTONE"]
+    key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_\-\.]{1,40}$")
+    goal: str = Field(min_length=20, max_length=8000)
+
+
+class NoFurtherWork(_D):
+    """Only valid for PLAN_NEXT_MILESTONE events: nothing worthwhile remains within charter and policy."""
+    type: Literal["NO_FURTHER_WORK"]
+    reason: str = Field(min_length=3, max_length=3000)
+
+
 Decision = Annotated[Union[CreateTasks, AssignTask, RequestRevision, RequestReview, ApproveTask,
-                           BlockTask, CompleteMilestone, RequestHumanApproval], Field(discriminator="type")]
+                           BlockTask, CompleteMilestone, RequestHumanApproval, ProposeMilestone, NoFurtherWork],
+                     Field(discriminator="type")]
+PLANNING_DECISIONS = {"PROPOSE_MILESTONE", "NO_FURTHER_WORK"}
 
 
 class DecisionEnvelope(_D):

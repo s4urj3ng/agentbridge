@@ -106,9 +106,22 @@ is rejected here except for action scope_change (changing the milestone's goal o
 Hard policy (hardware no-go, protected branches, forbidden paths) still applies and cannot be waived."""
 
 
+PLAN_NEXT_RULES = """## Plan the next milestone
+The milestone above is COMPLETE. Decide what the project does next, using its summary, the
+project context and the open questions or next steps recorded in the files below.
+Respond with exactly ONE decision:
+- PROPOSE_MILESTONE {key, goal}: a new, bounded milestone (a handful of tasks, finishable in a few
+  hours) that builds on the completed work. `key` must be new (for example the next PORT-number).
+  `goal` must be self-contained: objective, deliverables (files), acceptance criteria and what is
+  out of scope. It starts immediately and runs unattended.
+- NO_FURTHER_WORK {reason}: when nothing useful remains that can be done within the charter and
+  policy, or every remaining step needs the owner (then say exactly what the owner must decide).
+Do not repeat work that is already complete."""
+
+
 def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, milestone: sqlite3.Row,
                            event: sqlite3.Row, manifest: dict, agents: dict[str, list[str]], limits: dict,
-                           previous_rejection: str | None = None) -> str:
+                           previous_rejection: str | None = None, extra: str | None = None) -> str:
     pid, mid = project["id"], milestone["id"]
     payload = jload(event["payload_json"], {})
     ctx = project_context(conn, pid)
@@ -179,6 +192,13 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
             f"- {d['decision_type']}: {d['status']}" + (f" ({d['rejection_reason'][:200]})" if d["rejection_reason"] else "")
             for d in recent))
     sections.append(f"## Event to handle: {event['type']}")
+    if event["type"] == "PLAN_NEXT_MILESTONE":
+        done = rows(conn, "SELECT key, summary FROM milestones WHERE project_id=? AND status='COMPLETED' "
+                          "ORDER BY id DESC LIMIT 8", pid)
+        sections.append(PLAN_NEXT_RULES + "\nRecently completed milestones (newest first): "
+                        + ", ".join(r["key"] for r in done))
+    if extra:
+        sections.append(extra)
     free_text = {k: v for k, v in payload.items() if k in UNTRUSTED_PAYLOAD_KEYS and v}
     if free_text:
         sections.append(fence("event_details", json.dumps(free_text, indent=1, default=str)))

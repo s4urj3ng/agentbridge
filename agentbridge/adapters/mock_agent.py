@@ -49,7 +49,8 @@ def tech_lead(state: dict, scenario: str) -> dict:
     reviewers = [r for r in agents.get("reviewers", []) if r != task.get("assignee")]
     if et == "GOAL_SUBMITTED":
         goal = state.get("milestone", {}).get("goal", "")
-        if scenario == "calc" or re.search(r"\b(add|mul|calc)\b", goal):
+        auto = state.get("milestone", {}).get("key", "").startswith("AUTO")   # auto-planned follow-ups
+        if (scenario == "calc" and not auto) or re.search(r"\b(add|mul|calc)\b", goal):
             second = workers[1] if len(workers) > 1 else workers[0]
             return {"rationale": "Split into a bug fix and a dependent feature.", "decisions": [{
                 "type": "CREATE_TASKS", "tasks": [
@@ -82,6 +83,14 @@ def tech_lead(state: dict, scenario: str) -> dict:
         return {"rationale": "Address review.", "decisions": [{
             "type": "REQUEST_REVISION", "task_id": task["id"],
             "feedback": "Reviewer requested changes; see review."}]}
+    if et == "PLAN_NEXT_MILESTONE":
+        done = state.get("milestone", {}).get("key", "")
+        if done.startswith("AUTO"):
+            return {"rationale": "Nothing left.", "decisions": [{"type": "NO_FURTHER_WORK",
+                                                                 "reason": "All planned work is complete."}]}
+        return {"rationale": "Continue with notes.", "decisions": [{
+            "type": "PROPOSE_MILESTONE", "key": "AUTO-1",
+            "goal": "Write short design notes for the next iteration of the project."}]}
     if et == "MILESTONE_READY":
         return {"rationale": "All tasks completed.", "decisions": [{
             "type": "COMPLETE_MILESTONE", "milestone_id": state["milestone"]["id"],
