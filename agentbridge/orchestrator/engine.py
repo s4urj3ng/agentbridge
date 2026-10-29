@@ -1045,6 +1045,10 @@ class Engine:
         if not repo:
             raise RuntimeError("project has no GitHub remote_url")
         await asyncio.to_thread(ws.push_branch, ms["integration_branch"])
+        if ms["pr_number"]:   # already open (e.g. opened early for review): the push updated it
+            with tx(self.conn):
+                audit(self.conn, "engine", "github.draft_pr_updated", project_id=project["id"], url=ms["pr_url"])
+            return
         body = f"## {ms['key']}\n\n{ms['goal']}\n\n### Summary\n{ms['summary'] or ''}\n\n### Tasks\n" + "\n".join(
             f"- {t['key']}: {t['title']} ({t['state']})" for t in rows(self.conn, "SELECT key, title, state FROM tasks "
                                                                               "WHERE milestone_id=?", ms["id"]))

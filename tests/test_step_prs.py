@@ -55,3 +55,15 @@ def test_github_failure_never_blocks_integration(settings, tmp_path):
     assert all(t["state"] == "COMPLETED" for t in q(e, "SELECT state FROM tasks WHERE milestone_id=?", mid))
     failed = q(e, "SELECT detail_json FROM audit_log WHERE action='github.step_pr_failed'")
     assert len(failed) == 2 and "Bad credentials" in failed[0]["detail_json"]
+
+
+def test_milestone_pr_opened_early_is_not_duplicated(settings, tmp_path):
+    import asyncio
+    e, remote, calls = _setup(settings, tmp_path)
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul()", "S3")
+    run(e, 120)
+    e.conn.execute("UPDATE milestones SET pr_url='https://github.com/me/demo-calc/pull/9', pr_number=9 WHERE id=?",
+                   (mid,))
+    n = len(calls)
+    asyncio.run(e._create_draft_pr(mid))
+    assert len(calls) == n and q(e, "SELECT COUNT(*) c FROM audit_log WHERE action='github.draft_pr_updated'")[0]["c"] == 1
