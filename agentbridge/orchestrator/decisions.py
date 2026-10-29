@@ -36,6 +36,7 @@ class NewTask(_D):
     allowed_paths: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=30)
     parent_task_id: int | None = None
     timeout_s: int | None = Field(default=None, ge=60, le=4 * 3600)
+    replaces: str | None = None    # key of an existing task this one redoes (it is cancelled, dependents move here)
 
 
 class CreateTasks(_D):

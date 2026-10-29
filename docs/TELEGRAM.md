@@ -3,8 +3,14 @@
 Check quota and progress, and get notified, without touching the server.
 
 - **Outbound only:** long polling to `api.telegram.org`, no webhook, no open port.
-- **Buttons:** 📊 Quota · 📁 Dự án (projects) · 📝 Chờ duyệt (approvals) · ⚙️ Phân công
-  (assignment) · 🔄 Làm mới (refresh). Commands: `/status`, `/quota`, `/approvals`, `/assign`.
+- **Buttons:** 📊 Quota · 📁 Dự án (projects) · 📈 Tiến độ (progress) · 📝 Chờ duyệt (approvals) ·
+  ⚙️ Phân công (assignment) · 🔄 Làm mới (refresh). Commands: `/status`, `/quota`, `/progress`,
+  `/approvals`, `/assign`.
+- **Progress view:** per open milestone (or the last completed one), a bar with the share of tasks
+  done, counts per stage (✅ xong · ▶️ đang làm · 🔍 chờ review · ✏️ cần sửa · ⏳ chờ · ⛔ bị chặn) and one
+  line per task with who is on it. Cancelled tasks are left out, so a blocked task that the Tech
+  Lead redid as a new one (`replaces`, or `agentbridge task replace OLD NEW`) counts once. The share
+  is of the current plan: it drops when the Tech Lead adds tasks.
 - **Quota view:** agents grouped by role (🧠 Tech Lead, 🛠 Code, 🔍 Review), with one aligned
   line per provider window, for example `5h ▓▓▓▓▓░░░░░ còn 46% ↻ 52p` (↻ = time until reset: minutes
   or hours within a day, otherwise weekday and time, e.g. `T7 14:13`). The header shows the current

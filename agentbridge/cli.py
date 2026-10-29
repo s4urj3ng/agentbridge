@@ -111,6 +111,12 @@ def cmd_tasks(args):
                                          "attempt_count, branch, blocked_reason FROM tasks ORDER BY id")])
 
 
+def cmd_task_replace(args):
+    e = _engine(args)
+    e.replace_task(args.old, args.new, "owner:cli")
+    print(f"task {args.old} replaced by {args.new}: old task cancelled, dependents moved")
+
+
 def cmd_events(args):
     e = _engine(args)
     for r in rows(e.conn, "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", args.n)[::-1]:
@@ -308,6 +314,9 @@ def main(argv: list[str] | None = None) -> None:
     x.add_argument("-v", "--verbose", action="store_true"); x.set_defaults(fn=cmd_run)
     sub.add_parser("status").set_defaults(fn=cmd_status)
     sub.add_parser("tasks").set_defaults(fn=cmd_tasks)
+    x = sub.add_parser("task"); ts = x.add_subparsers(dest="action", required=True)
+    x = ts.add_parser("replace", help="NEW redoes OLD: cancel OLD, move its dependents to NEW")
+    x.add_argument("old", type=int); x.add_argument("new", type=int); x.set_defaults(fn=cmd_task_replace)
     x = sub.add_parser("events"); x.add_argument("-n", type=int, default=40); x.set_defaults(fn=cmd_events)
     x = sub.add_parser("agents")
     x.add_argument("action", choices=["list", "detect", "smoke", "enable", "disable", "pause", "resume", "concurrency"])

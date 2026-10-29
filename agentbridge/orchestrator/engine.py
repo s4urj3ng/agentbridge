@@ -280,6 +280,29 @@ class Engine:
     def cancel_task(self, task_id: int, actor: str) -> None:
         transition(self.conn, task_id, S.CANCELLED, actor=actor, reason="cancelled by owner")
 
+    def replace_task(self, old_id: int, new_id: int, actor: str) -> None:
+        """`new_id` redoes `old_id` (e.g. a fresh task after the revision limit): see _replace_task_rows."""
+        with tx(self.conn):
+            old, new = (row(self.conn, "SELECT * FROM tasks WHERE id=?", i) for i in (old_id, new_id))
+            if old is None or new is None or old["milestone_id"] != new["milestone_id"] or old_id == new_id:
+                raise ValueError("both tasks must exist, differ and belong to the same milestone")
+            if old["state"] == S.COMPLETED:
+                raise ValueError(f"task {old['key']} is completed and cannot be replaced")
+            self._replace_task_rows(old_id, new_id, actor)
+
+    def _replace_task_rows(self, old_id: int, new_id: int, actor: str) -> None:
+        """Cancel the old task (counted once in progress) and move its dependents to the new one."""
+        old = row(self.conn, "SELECT key, state FROM tasks WHERE id=?", old_id)
+        new_key = row(self.conn, "SELECT key FROM tasks WHERE id=?", new_id)["key"]
+        if S.CANCELLED in ALLOWED[S(old["state"])]:
+            transition(self.conn, old_id, S.CANCELLED, actor=actor, reason=f"replaced by {new_key}")
+        for r in rows(self.conn, "SELECT task_id FROM task_dependencies WHERE depends_on_id=?", old_id):
+            if r["task_id"] != new_id:
+                self.conn.execute("INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id) VALUES (?,?)",
+                                  (r["task_id"], new_id))
+        self.conn.execute("DELETE FROM task_dependencies WHERE depends_on_id=?", (old_id,))
+        audit(self.conn, actor, "task.replace", task_id=old_id, old=old["key"], new=new_key)
+
     def owner_note(self, project_slug: str, text: str, actor: str = "owner") -> list[str]:
         """Standing owner instruction: stored as trusted project context and handed to the Tech Lead
         now (a HUMAN_DECISION event per active milestone). Returns the milestone keys notified."""
@@ -768,6 +791,11 @@ class Engine:
                 for dep in nt.depends_on:
                     if dep not in keys and dep not in batch:
                         raise PolicyViolation(f"unknown dependency {dep!r}")
+                if nt.replaces is not None:
+                    if nt.replaces not in keys:
+                        raise PolicyViolation(f"replaces unknown task {nt.replaces!r}")
+                    if row(self.conn, "SELECT state FROM tasks WHERE id=?", keys[nt.replaces])["state"] == S.COMPLETED:
+                        raise PolicyViolation(f"task {nt.replaces!r} is completed and cannot be replaced")
                 depth = 0
                 if nt.parent_task_id is not None:
                     parent = self._task_in_milestone(nt.parent_task_id, milestone)
@@ -794,6 +822,9 @@ class Engine:
                 for dep in nt.depends_on:
                     self.conn.execute("INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?,?)",
                                       (keys[nt.key], keys[dep]))
+            for nt in d.tasks:
+                if nt.replaces is not None:
+                    self._replace_task_rows(keys[nt.replaces], keys[nt.key], "tech_lead")
             return
         if d.type == "ASSIGN_TASK":
             t = self._task_in_milestone(d.task_id, milestone)

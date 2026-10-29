@@ -31,7 +31,7 @@ from ..config import Settings
 from ..db import audit, connect, jload, row, rows, tx
 from ..orchestrator import overrides
 from ..policies.safety import PolicyViolation, redact
-from ..reporting import engine_running, overview, quota_report
+from ..reporting import engine_running, milestone_progress, overview, quota_report
 
 log = logging.getLogger("agentbridge.telegram")
 
@@ -41,8 +41,8 @@ DEFAULT_NOTIFY = ["milestone_completed", "task_blocked", "task_completed", "appr
 MAX_LEN = 3900
 
 MAIN_MENU = [[{"text": "📊 Quota", "callback_data": "quota"}, {"text": "📁 Dự án", "callback_data": "overview"}],
-             [{"text": "📝 Chờ duyệt", "callback_data": "approvals"}, {"text": "⚙️ Phân công", "callback_data": "cfg"}],
-             [{"text": "🔄 Làm mới", "callback_data": "refresh"}]]
+             [{"text": "📈 Tiến độ", "callback_data": "progress"}, {"text": "📝 Chờ duyệt", "callback_data": "approvals"}],
+             [{"text": "⚙️ Phân công", "callback_data": "cfg"}, {"text": "🔄 Làm mới", "callback_data": "refresh"}]]
 
 # Vietnamese labels for the runtime override keys
 KEY_LABELS = {"default_worker": "worker mặc định", "workers": "thứ tự Code", "reviewers": "thứ tự Review",
@@ -56,6 +56,11 @@ CFG_PREFIXES = {"cs:", "cl:", "ca:", "cu:", "cr:", "cg:"}
 STATE_ICONS = {"provider_stop": "🟡", "cooldown": "🔴", "circuit_open": "🔴", "paused": "⏸"}
 ACTION_LABELS = {"start_milestone": "Bắt đầu milestone", "create_draft_pr": "Tạo draft PR",
                  "unblock_task": "Gỡ chặn task", "other": "Cần quyết định"}
+PROGRESS_ICONS = {"done": "✅", "running": "▶️", "review": "🔍", "revising": "✏️", "waiting": "⏳", "blocked": "⛔"}
+PROGRESS_LABELS = {"done": "xong", "running": "đang làm", "review": "chờ review", "revising": "cần sửa",
+                   "waiting": "chờ", "blocked": "bị chặn"}
+MILESTONE_LABELS = {"ACTIVE": "🟢 đang chạy", "BLOCKED": "⛔ đang dừng", "AWAITING_APPROVAL": "⏸ chờ duyệt bắt đầu",
+                    "COMPLETED": "✅ đã xong"}
 FULL_CHUNK = 3000   # raw characters per "📄 Xem đầy đủ" message (HTML escaping may grow it)
 
 
@@ -521,6 +526,39 @@ class TelegramBot:
             return "Nút không còn hợp lệ, mở lại.", self.assign_text()
         return "Nút không còn hợp lệ, mở lại.", self.assign_text()
 
+    def progress_text(self) -> tuple[str, list]:
+        """Per milestone: % of the current plan done, counts per bucket, then one line per task."""
+        lines = ["<b>📈 Tiến độ</b>"]
+        for p in rows(self.conn, "SELECT id, name, paused FROM projects ORDER BY id"):
+            mss = rows(self.conn, "SELECT id, key, status FROM milestones WHERE project_id=? AND status IN "
+                                  "('ACTIVE','AWAITING_APPROVAL','BLOCKED') ORDER BY id", p["id"])
+            if not mss:
+                mss = rows(self.conn, "SELECT id, key, status FROM milestones WHERE project_id=? AND "
+                                      "status='COMPLETED' ORDER BY completed_at DESC LIMIT 1", p["id"])
+            for m in mss:
+                pr = milestone_progress(self.conn, m["id"])
+                lines += ["", f"<b>{esc(p['name'])}</b> · {esc(m['key'])} · {MILESTONE_LABELS.get(m['status'], m['status'])}"
+                          + (" · ⏸ dự án tạm dừng" if p["paused"] else ""),
+                          f"<code>{bar(pr['pct'])}</code> <b>{pr['pct']}%</b> · {pr['done']}/{pr['total']} task xong",
+                          " · ".join(f"{PROGRESS_ICONS[b]} {n} {PROGRESS_LABELS[b]}" for b, n in pr["buckets"].items() if n)]
+                if pr["replaced"]:
+                    lines.append(f"<i>{pr['replaced']} task bị chặn đã được làm lại bằng task mới (chỉ tính một lần)</i>")
+                for t in pr["tasks"]:
+                    extra = ""
+                    if t["bucket"] in ("running", "revising", "waiting") and t["revision_count"]:
+                        extra = f" · sửa lần {t['revision_count']}"
+                    if t["bucket"] == "running":
+                        extra = f" · {esc(t['assignee'] or '-')}" + extra
+                    elif t["bucket"] == "review":
+                        extra = f" · {esc(t['reviewer'] or '-')}"
+                    elif t["bucket"] == "blocked":
+                        extra = f": {esc((t['blocked_reason'] or '')[:100])}"
+                    lines.append(f"{PROGRESS_ICONS[t['bucket']]} {esc(t['key'])}{extra}")
+        if len(lines) == 1:
+            lines.append("Chưa có milestone nào.")
+        lines += ["", "<i>% tính trên kế hoạch hiện tại của Tech Lead: có thể giảm khi nó thêm task.</i>"]
+        return "\n".join(lines), MAIN_MENU
+
     # ------------------------------------------------------------ updates
     def handle_update(self, u: dict) -> None:
         msg = u.get("message")
@@ -534,7 +572,7 @@ class TelegramBot:
         if msg:
             text = (msg.get("text") or "").strip().split("@")[0]
             view = {"/quota": self.quota_text, "/status": self.overview_text, "/approvals": self.approvals_text,
-                    "/assign": self.assign_text}.get(text)
+                    "/assign": self.assign_text, "/progress": self.progress_text}.get(text)
             if view:
                 self.send(chat_id, *view())
             else:
@@ -566,7 +604,7 @@ class TelegramBot:
                     view = self.agent_text(data[6:])
                 else:
                     view = {"quota": self.quota_text, "overview": self.overview_text, "refresh": self.overview_text,
-                            "approvals": self.approvals_text}.get(data, lambda: ("Chọn mục:", MAIN_MENU))()
+                            "approvals": self.approvals_text, "progress": self.progress_text}.get(data, lambda: ("Chọn mục:", MAIN_MENU))()
             if view is None:
                 return
             text, kb = view

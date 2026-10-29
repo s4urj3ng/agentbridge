@@ -102,18 +102,40 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return out
 
 
+# Progress buckets, in display order. CANCELLED tasks (including replaced ones) are not counted.
+PROGRESS_BUCKETS = {"done": ("APPROVED", "COMPLETED"), "running": ("DISPATCHED", "RUNNING", "VALIDATING"),
+                    "review": ("REVIEW_PENDING",), "revising": ("REVISION_REQUIRED",),
+                    "waiting": ("CREATED", "QUEUED"), "blocked": ("BLOCKED", "FAILED")}
+
+
+def milestone_progress(conn: sqlite3.Connection, milestone_id: int) -> dict[str, Any]:
+    """Share of the milestone's current plan that is done. It can drop when the Tech Lead adds tasks."""
+    tasks = [dict(r) for r in rows(conn, "SELECT id, key, title, state, assignee, reviewer, revision_count, "
+                                         "blocked_reason, updated_at FROM tasks WHERE milestone_id=? AND "
+                                         "state != 'CANCELLED' ORDER BY id", milestone_id)]
+    bucket_of = {st: b for b, sts in PROGRESS_BUCKETS.items() for st in sts}
+    for t in tasks:
+        t["bucket"] = bucket_of.get(t["state"], "waiting")
+    counts: dict[str, int] = {}
+    for t in tasks:
+        counts[t["state"]] = counts.get(t["state"], 0) + 1
+    buckets = {b: sum(1 for t in tasks if t["bucket"] == b) for b in PROGRESS_BUCKETS}
+    total, done = len(tasks), buckets["done"]
+    replaced = row(conn, "SELECT COUNT(*) c FROM audit_log a JOIN tasks t ON t.id=a.task_id WHERE "
+                         "a.action='task.replace' AND t.milestone_id=?", milestone_id)["c"]
+    return {"total": total, "done": done, "pct": round(100 * done / total) if total else 0,
+            "buckets": buckets, "counts": counts, "tasks": tasks, "replaced": replaced}
+
+
 def overview(conn: sqlite3.Connection) -> dict[str, Any]:
     projects = []
     for p in rows(conn, "SELECT * FROM projects ORDER BY id"):
         mss = []
         for m in rows(conn, "SELECT * FROM milestones WHERE project_id=? AND status IN "
                             "('ACTIVE','AWAITING_APPROVAL','BLOCKED') ORDER BY id", p["id"]):
-            counts = {r["state"]: r["c"] for r in rows(conn, "SELECT state, COUNT(*) c FROM tasks WHERE "
-                                                             "milestone_id=? GROUP BY state", m["id"])}
-            total = sum(counts.values())
-            done = counts.get("COMPLETED", 0) + counts.get("CANCELLED", 0)
-            mss.append({"key": m["key"], "status": m["status"], "goal": m["goal"], "total": total, "done": done,
-                        "pct": round(100 * done / total) if total else 0, "counts": counts,
+            pr = milestone_progress(conn, m["id"])
+            mss.append({"key": m["key"], "status": m["status"], "goal": m["goal"], "total": pr["total"],
+                        "done": pr["done"], "pct": pr["pct"], "counts": pr["counts"],
                         "running": [dict(r) for r in rows(conn, "SELECT key, assignee, state FROM tasks WHERE "
                                                                 "milestone_id=? AND state IN ('DISPATCHED','RUNNING',"
                                                                 "'VALIDATING') ORDER BY id", m["id"])],

@@ -84,6 +84,8 @@ Guidelines:
 - Prefer deterministic validation results over extra reviews; request an independent
   review only for risky or non-trivial changes. Reviewer capacity is scarce.
 - Approve only when validation passed and acceptance criteria are met.
+- To redo a BLOCKED task as a fresh one, CREATE_TASKS with `replaces` set to the old task's key:
+  the old task is cancelled and the tasks that depended on it now depend on the new one.
 - When everything in the milestone is done, use COMPLETE_MILESTONE.
 - If something needs owner judgment, use REQUEST_HUMAN_APPROVAL.
 """
