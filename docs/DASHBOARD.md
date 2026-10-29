@@ -17,9 +17,21 @@ Times use `telegram.timezone` (default `Asia/Seoul`).
 
 ## Sign-in and hardening
 
-Every page except `/login`, `/api/health` and `/webhooks/github` needs the admin token
-(`AGENTBRIDGE_ADMIN_TOKEN` in `/etc/agentbridge/agentbridge.env`), either as a 12-hour session
-cookie from `/login` or as `Authorization: Bearer …`. Form posts carry a CSRF token.
+Every page except `/login`, `/api/health` and `/webhooks/github` needs a 12-hour session cookie
+from `/login`, or `Authorization: Bearer $AGENTBRIDGE_ADMIN_TOKEN` (scripts and the JSON API).
+Form posts carry a CSRF token.
+
+Sign in with a user name and password by adding them to `/etc/agentbridge/agentbridge.env`:
+
+```bash
+AGENTBRIDGE_WEB_USER=avp
+AGENTBRIDGE_WEB_PASSWORD=<a long password>
+```
+
+then `sudo systemctl restart agentbridge-api`. With a password set the login page asks for user
+name and password only (the token no longer signs in to the web, but still works for the API).
+Without one it asks for the admin token. Changing the password or the token signs out every open
+session.
 
 For a public URL the app also:
 
@@ -31,7 +43,7 @@ For a public URL the app also:
   the app's own resources;
 - asks search engines not to index the pages.
 
-The token gives full control (approvals, cancelling tasks, agents). Use a long random token, and
+The login gives full control (approvals, cancelling tasks, agents). Use a long password, and
 put Cloudflare Access in front of the hostname so that only your e-mail address reaches the login
 page at all.
 

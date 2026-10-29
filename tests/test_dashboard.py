@@ -1,7 +1,7 @@
 """Web dashboard: pages render with live data, and the hardening for a public (Cloudflare) URL."""
 from __future__ import annotations
 
-from .conftest import run
+from .conftest import q, run
 from .test_security import H, TOKEN, client  # noqa: F401  (fixture)
 
 
@@ -39,3 +39,23 @@ def test_login_is_throttled_per_client_ip(client):  # noqa: F811
     other = c.post("/login", data={"token": TOKEN}, headers={"cf-connecting-ip": "198.51.100.2"},
                    follow_redirects=False)
     assert other.status_code == 303
+
+
+def test_user_password_login_replaces_token_form(client, monkeypatch):  # noqa: F811
+    c, e = client
+    assert 'name="token"' in c.get("/login").text                 # no password set: token form
+    monkeypatch.setenv("AGENTBRIDGE_WEB_USER", "avp")
+    monkeypatch.setenv("AGENTBRIDGE_WEB_PASSWORD", "correct horse battery")
+    page = c.get("/login").text
+    assert 'name="username"' in page and 'name="password"' in page and 'name="token"' not in page
+    assert c.post("/login", data={"token": TOKEN}).status_code == 401           # token no longer signs in
+    assert c.post("/login", data={"username": "root", "password": "correct horse battery"}).status_code == 401
+    assert c.post("/login", data={"username": "avp", "password": "wrong"}).status_code == 401
+    r = c.post("/login", data={"username": "avp", "password": "correct horse battery"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert c.get("/", headers={"accept": "text/html"}, follow_redirects=False).status_code == 200
+    assert c.get("/api/status", headers=H).status_code == 200                     # API keeps the bearer token
+    monkeypatch.setenv("AGENTBRIDGE_WEB_PASSWORD", "new password")                 # changing it signs sessions out
+    assert c.get("/", headers={"accept": "text/html"}, follow_redirects=False).headers["location"] == "/login"
+    failed = q(e, "SELECT detail_json FROM audit_log WHERE action='auth.login_failed'")
+    assert len(failed) == 3 and all("wrong" not in f["detail_json"] and "root" not in f["detail_json"] for f in failed)

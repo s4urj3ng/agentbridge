@@ -110,6 +110,8 @@ def activity(conn: sqlite3.Connection, limit: int = 40) -> list[dict[str, Any]]:
             text = f"Đổi phân công ({e['action'][7:]})"
         elif e["action"] == "auth.login_failed":
             kind, text = "bad", f"Đăng nhập sai từ {d.get('ip', '?')}"
+        elif e["action"] == "auth.login":
+            text = f"Đăng nhập dashboard từ {d.get('ip', '?')}"
         out.append({"at": e["created_at"], "actor": e["actor"], "kind": kind, "text": text, "task_id": e["task_id"]})
     return out
 

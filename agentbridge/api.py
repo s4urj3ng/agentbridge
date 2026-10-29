@@ -5,7 +5,8 @@ This process never executes agents. It reads state and writes owner intents
 
 Auth: every route except /api/health, /login and /webhooks/github requires
 either `Authorization: Bearer $AGENTBRIDGE_ADMIN_TOKEN` or a signed session
-cookie obtained by logging in with that token. Cookie-authenticated POSTs must
+cookie obtained by logging in: with AGENTBRIDGE_WEB_USER / AGENTBRIDGE_WEB_PASSWORD
+when a password is set, otherwise with the admin token. Cookie-authenticated POSTs must
 carry a CSRF token. Bind to 127.0.0.1 and reach it via Tailscale, or publish it
 through a Cloudflare Tunnel (docs/DASHBOARD.md): failed logins are throttled per
 client IP and the session cookie is marked Secure behind an HTTPS proxy.
@@ -98,11 +99,16 @@ def create_app(settings: Settings) -> FastAPI:
     def sign(value: str) -> str:
         return hmac.new(secret, value.encode(), hashlib.sha256).hexdigest()
 
+    def session_subject(exp: str) -> str:
+        # bound to the current credentials: changing the password or token signs everyone out
+        creds = f"{settings.web_user}:{settings.web_password}" if settings.web_password else settings.admin_token or ""
+        return f"admin:{exp}:{hashlib.sha256(creds.encode()).hexdigest()[:16]}"
+
     def session_valid(cookie: str | None) -> bool:
         if not cookie or "." not in cookie:
             return False
         exp, sig = cookie.split(".", 1)
-        return exp.isdigit() and int(exp) > time.time() and hmac.compare_digest(sig, sign("admin:" + exp))
+        return exp.isdigit() and int(exp) > time.time() and hmac.compare_digest(sig, sign(session_subject(exp)))
 
     def csrf_for(cookie: str) -> str:
         return sign("csrf:" + cookie)[:32]
@@ -154,25 +160,35 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request):
-        return TEMPLATES.TemplateResponse(request, "login.html", {"request": request, "error": None, "nav": "login"})
+        return TEMPLATES.TemplateResponse(request, "login.html", {"request": request, "error": None, "nav": "login",
+                                                                  "use_password": bool(settings.web_password)})
 
     @app.post("/login")
-    def login(request: Request, token: str = Form(...)):
+    def login(request: Request, username: str = Form(""), password: str = Form(""), token: str = Form("")):
         ip = client_ip(request)
+        use_password = bool(settings.web_password)
+        ctx = {"request": request, "nav": "login", "use_password": use_password}
         if throttled(ip):
-            return TEMPLATES.TemplateResponse(request, "login.html", {
-                "request": request, "nav": "login",
+            return TEMPLATES.TemplateResponse(request, "login.html", ctx | {
                 "error": "Sai quá nhiều lần. Thử lại sau 15 phút."}, status_code=429)
-        if not settings.admin_token or not hmac.compare_digest(token, settings.admin_token):
+        if use_password:
+            # compare both fields every time so a wrong user name takes as long as a wrong password
+            ok_user = hmac.compare_digest(username.strip().encode(), settings.web_user.encode())
+            ok = hmac.compare_digest(password.encode(), settings.web_password.encode()) and ok_user
+        else:
+            ok = bool(settings.admin_token) and hmac.compare_digest(token.encode(), settings.admin_token.encode())
+        if not ok:
             failures.setdefault(ip, []).append(time.time())
             with tx(conn):
                 audit(conn, "anonymous", "auth.login_failed", ip=ip)
-            return TEMPLATES.TemplateResponse(request, "login.html", {"request": request, "error": "Sai token",
-                                                                      "nav": "login"}, status_code=401)
+            return TEMPLATES.TemplateResponse(request, "login.html", ctx | {
+                "error": "Sai tên đăng nhập hoặc mật khẩu" if use_password else "Sai token"}, status_code=401)
         failures.pop(ip, None)
         exp = str(int(time.time()) + SESSION_TTL)
+        with tx(conn):
+            audit(conn, f"owner:{settings.web_user}" if use_password else "owner:token", "auth.login", ip=ip)
         resp = RedirectResponse("/", status_code=303)
-        resp.set_cookie("ab_session", f"{exp}.{sign('admin:' + exp)}", httponly=True, samesite="strict",
+        resp.set_cookie("ab_session", f"{exp}.{sign(session_subject(exp))}", httponly=True, samesite="strict",
                         secure=is_https(request), max_age=SESSION_TTL)
         return resp
 

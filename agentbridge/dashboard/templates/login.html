@@ -6,9 +6,14 @@
   <p class="sub">Dashboard điều khiển AgentBridge.</p>
   {% if error %}<p class="chip bad" style="margin:0 0 12px">{{ error }}</p>{% endif %}
   <form method="post" action="/login">
+    {% if use_password %}
+    <input name="username" placeholder="Tên đăng nhập" autocomplete="username" style="width:100%" required autofocus>
+    <input type="password" name="password" placeholder="Mật khẩu" autocomplete="current-password" style="width:100%;margin-top:8px" required>
+    {% else %}
     <input type="password" name="token" placeholder="Admin token" autocomplete="current-password" style="width:100%" required autofocus>
+    {% endif %}
     <button class="primary" style="width:100%;margin-top:10px">Đăng nhập</button>
   </form>
-  <p class="muted small" style="margin:14px 0 0">Token là <code>AGENTBRIDGE_ADMIN_TOKEN</code> trong <code>/etc/agentbridge/agentbridge.env</code> trên server.</p>
+  {% if not use_password %}<p class="muted small" style="margin:14px 0 0">Chưa đặt mật khẩu: đăng nhập bằng <code>AGENTBRIDGE_ADMIN_TOKEN</code>. Thêm <code>AGENTBRIDGE_WEB_USER</code> và <code>AGENTBRIDGE_WEB_PASSWORD</code> vào <code>/etc/agentbridge/agentbridge.env</code> rồi khởi động lại <code>agentbridge-api</code> để chuyển sang tên đăng nhập và mật khẩu.</p>{% endif %}
 </div>
 {% endblock %}

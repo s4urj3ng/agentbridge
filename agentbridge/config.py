@@ -72,6 +72,15 @@ class Settings:
         return os.environ.get("AGENTBRIDGE_ADMIN_TOKEN") or None
 
     @property
+    def web_user(self) -> str:
+        return os.environ.get("AGENTBRIDGE_WEB_USER") or "admin"
+
+    @property
+    def web_password(self) -> str | None:
+        """Dashboard sign-in password; when unset the login page asks for the admin token instead."""
+        return os.environ.get("AGENTBRIDGE_WEB_PASSWORD") or None
+
+    @property
     def session_secret(self) -> str:
         return os.environ.get("AGENTBRIDGE_SESSION_SECRET") or (self.admin_token or "") + ":session"
 
