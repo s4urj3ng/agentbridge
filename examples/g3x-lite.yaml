@@ -52,8 +52,8 @@ policy:
 
 limits:
   max_task_depth: 1
-  max_tasks_per_milestone: 12
-  max_revisions: 4                 # autonomous mode: room for review/revise cycles
+  max_tasks_per_milestone: 200     # owner: unattended runs should not stop on a task count
+  max_revisions: 8                 # autonomous mode: room for review/revise cycles
 
 charter: |
   Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Work is strictly offline:

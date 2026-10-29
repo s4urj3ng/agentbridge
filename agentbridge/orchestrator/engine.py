@@ -929,6 +929,14 @@ class Engine:
                     await self._create_draft_pr(ev["milestone_id"])
             else:
                 ms = row(self.conn, "SELECT status FROM milestones WHERE id=?", ev["milestone_id"]) if ev["milestone_id"] else None
+                if ms and ms["status"] == "BLOCKED" and approved:
+                    # the owner reviewed progress (Tech Lead cap): resume with a fresh invocation budget
+                    with tx(self.conn):
+                        self.conn.execute("UPDATE milestones SET status='ACTIVE', tl_invocations=0 WHERE id=?",
+                                          (ev["milestone_id"],))
+                        audit(self.conn, "owner", "milestone.resume", project_id=ev["project_id"],
+                              milestone_id=ev["milestone_id"], approval_id=p.get("approval_id"))
+                    ms = {"status": "ACTIVE"}
                 if ms and ms["status"] == "ACTIVE":
                     with tx(self.conn):
                         evq.emit(self.conn, "HUMAN_DECISION", project_id=ev["project_id"], milestone_id=ev["milestone_id"],

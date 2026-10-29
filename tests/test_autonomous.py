@@ -92,3 +92,22 @@ def test_owner_note_reaches_tech_lead(settings, tmp_path, capsys, monkeypatch):
                                     event=row(e.conn, "SELECT * FROM events WHERE milestone_id=? ORDER BY id DESC", mid),
                                     manifest={}, agents={}, limits={})
     assert "[constraint] Owner instruction: AgentBridge runs validation" in prompt
+
+
+def test_approving_tl_cap_resumes_milestone(settings, tmp_path):
+    settings.limits.max_tl_invocations_per_milestone = 1
+    e = make_engine(settings)
+    register(e, tmp_path)
+    e.conn.execute("UPDATE agents SET paused=1 WHERE id='mock-worker'")      # tasks wait, events keep coming
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul()", "AU7")
+    run(e, 20)
+    e.owner_note("demo-calc", "second event for the Tech Lead")
+    run(e, 20)
+    assert q(e, "SELECT status FROM milestones WHERE id=?", mid)[0]["status"] == "BLOCKED"
+    cap = q(e, "SELECT id FROM approval_requests WHERE milestone_id=? AND status='PENDING'", mid)[0]["id"]
+    settings.limits.max_tl_invocations_per_milestone = 50
+    e.resolve_approval(cap, True, "owner:test", "carry on")
+    run(e, 20)
+    ms = q(e, "SELECT status, tl_invocations FROM milestones WHERE id=?", mid)[0]
+    assert ms["status"] == "ACTIVE" and ms["tl_invocations"] >= 1
+    assert q(e, "SELECT actor FROM audit_log WHERE action='milestone.resume'") == [{"actor": "owner"}]
