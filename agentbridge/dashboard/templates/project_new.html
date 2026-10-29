@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Thêm dự án · AgentBridge{% endblock %}
+{% block body %}
+<h1>Thêm dự án</h1>
+<p class="sub">Engine sẽ clone repo về server, đăng ký dự án, rồi (nếu bạn điền) giao goal đầu tiên cho Tech Lead.</p>
+{% if error %}<div class="card" style="border-color:var(--bad);margin-bottom:12px"><b class="bad">Chưa lưu được:</b> {{ error }}</div>{% endif %}
+<form method="post" action="/projects/new" class="grid" style="max-width:860px">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<section class="card grid">
+  <h2 style="margin:0">Repo</h2>
+  <label>Link git <input name="git_url" value="{{ f.git_url or '' }}" placeholder="https://github.com/you/repo hoặc /đường/dẫn/repo/trên/server" style="width:100%" required></label>
+  <div class="grid cols">
+    <label>Mã dự án (slug) <input name="slug" value="{{ f.slug or '' }}" placeholder="my-app" pattern="[a-z0-9][a-z0-9\-]{1,40}" style="width:100%"></label>
+    <label>Tên hiển thị <input name="name" value="{{ f.name or '' }}" placeholder="My App" style="width:100%"></label>
+    <label>Nhánh gốc <input name="base_branch" value="{{ f.base_branch or 'main' }}" style="width:100%"></label>
+  </div>
+  <p class="muted small" style="margin:0">Repo private cần quyền đọc cho user <code>agentbridge</code> (gh auth login như với GitHub PR).</p>
+</section>
+<section class="card grid">
+  <h2 style="margin:0">Đội agent</h2>
+  <div class="grid cols">
+    <label>Tech Lead <select name="tech_lead" style="width:100%">{% for a in choices.tech_lead %}<option {{ 'selected' if f.tech_lead == a }}>{{ a }}</option>{% endfor %}</select></label>
+    <label>Worker chính <select name="worker" style="width:100%">{% for a in choices.worker %}<option {{ 'selected' if f.worker == a }}>{{ a }}</option>{% endfor %}</select></label>
+    <label>Chính sách review <select name="review_policy" style="width:100%">{% for v, l in [('always', 'luôn review'), ('risk', 'chỉ thay đổi rủi ro'), ('never', 'không review')] %}<option value="{{ v }}" {{ 'selected' if f.review_policy == v }}>{{ l }}</option>{% endfor %}</select></label>
+  </div>
+  <div><div class="muted small">Worker dự phòng</div><div class="row">{% for a in choices.worker %}<label class="chip"><input type="checkbox" name="workers" value="{{ a }}" {{ 'checked' if a in (f.workers or []) }}> {{ a }}</label>{% endfor %}</div></div>
+  <div><div class="muted small">Reviewer (theo thứ tự ưu tiên)</div><div class="row">{% for a in choices.reviewer %}<label class="chip"><input type="checkbox" name="reviewers" value="{{ a }}" {{ 'checked' if a in (f.reviewers or []) }}> {{ a }}</label>{% endfor %}</div></div>
+</section>
+<section class="card grid">
+  <h2 style="margin:0">Kiểm tra và chính sách</h2>
+  <label>Lệnh test (chạy sau mỗi task) <input name="test_cmd" value="{{ f.test_cmd or '' }}" placeholder="python3 -m pytest -q" style="width:100%"></label>
+  <div class="row">
+    <label class="chip"><input type="checkbox" name="autonomous" value="1" {{ 'checked' if f.autonomous or not f }}> Tech Lead tự chạy tiếp, không hỏi lại</label>
+    <label class="chip"><input type="checkbox" name="hardware_strict" value="1" {{ 'checked' if f.hardware_strict }}> Cấm mọi thao tác phần cứng (STRICT_NO_GO)</label>
+    <label>Draft PR <select name="draft_pr">{% for v, l in [('approval', 'hỏi bạn trước'), ('auto', 'tự mở'), ('never', 'không mở')] %}<option value="{{ v }}" {{ 'selected' if f.draft_pr == v }}>{{ l }}</option>{% endfor %}</select></label>
+  </div>
+  <label>Mô tả dự án cho Tech Lead (charter) <textarea name="charter" placeholder="Dự án này là gì, ưu tiên gì, điều gì tuyệt đối không làm">{{ f.charter or '' }}</textarea></label>
+  <label>Sự thật đã biết (mỗi dòng một ý) <textarea name="context">{{ f.context or '' }}</textarea></label>
+</section>
+<section class="card grid">
+  <h2 style="margin:0">Goal đầu tiên (không bắt buộc)</h2>
+  <textarea name="first_goal" placeholder="Ví dụ: Đọc repo, viết tài liệu kiến trúc và bổ sung test cho phần thiếu.">{{ f.first_goal or '' }}</textarea>
+</section>
+<details class="card"><summary>Nâng cao: dán manifest YAML (thay cho các ô trên)</summary>
+  <textarea name="yaml" style="min-height:220px;margin-top:8px" class="mono" placeholder="project:&#10;  slug: my-app&#10;  name: My App&#10;  tech_lead: claude-team-lead&#10;  default_worker: antigravity-worker&#10;...">{{ f.yaml or '' }}</textarea>
+</details>
+<div class="row"><button class="primary">Thêm dự án</button><a href="/projects">Huỷ</a></div>
+</form>
+{% endblock %}

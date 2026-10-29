@@ -12,6 +12,22 @@ the same database and show the same numbers.
 - **Agent & quota:** quota per role, then each identity's detection, login state and usage, with
   enable/disable, pause/resume and concurrency controls.
 - **Chờ duyệt:** approve or reject with a note for the Tech Lead.
+- **Sơ đồ** (`/projects/<slug>/graph`): the milestone as a flow, n8n style: goal → Tech Lead → every
+  task in dependency order → integration → PR. Node colour and icon follow the task's stage; a
+  pulsing border and an animated edge mark what an agent is working on right now. Drag the
+  background to pan, scroll to zoom, drag nodes to arrange them (remembered per browser), click a
+  node for its status, latest review and links. Refreshes every 15 seconds.
+- **Chỉ đạo Tech Lead** (on the graph and project pages): type an instruction for the running
+  milestone (stored as an owner rule and handed to the Tech Lead now, which then creates, revises,
+  reassigns or cancels tasks itself), or give a new goal, which opens a new milestone the Tech Lead
+  plans. The thread shows what you said and every decision the Tech Lead took.
+- **Thêm dự án** (`/projects/new`): any number of projects. Give a git URL (or a path to a checkout
+  on the server), pick the Tech Lead, workers and reviewers, the test command and the policy, and
+  optionally a first goal. The engine clones the repo into `repos_dir` (default
+  `<data_dir>/repos`; on the N100 `/srv/agentbridge/repos`), registers it and starts the goal.
+  Private repos need read access for the `agentbridge` user (`gh auth login`, see AGENT_AUTH.md).
+- **Cấu hình dự án** (project page): the project's manifest as YAML. Saving validates it (known
+  agents, allowed test executables) and the engine applies it; the repository path never changes.
 
 Times use `telegram.timezone` (default `Asia/Seoul`).
 

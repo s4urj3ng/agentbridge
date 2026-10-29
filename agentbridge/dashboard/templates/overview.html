@@ -23,7 +23,8 @@
           <div class="muted small">{{ c.project.name }}</div>
           <div class="row" style="margin-top:2px"><a href="/projects/{{ c.project.slug }}" style="font-size:17px;font-weight:650;color:var(--fg)">{{ c.milestone.key }}</a>
             <span class="chip {{ 'ok' if c.milestone.status in ('ACTIVE', 'COMPLETED') else ('bad' if c.milestone.status == 'BLOCKED' else 'warn') }}">{{ c.status_vi }}</span>
-            {% if c.project.paused %}<span class="chip warn">dự án tạm dừng</span>{% endif %}</div>
+            {% if c.project.paused %}<span class="chip warn">dự án tạm dừng</span>{% endif %}
+            <a class="small" href="/projects/{{ c.project.slug }}/graph?m={{ c.milestone.id }}">sơ đồ →</a></div>
         </div>
         <div style="text-align:right"><div style="font-size:30px;font-weight:700;line-height:1">{{ c.pct }}%</div><div class="muted small">{{ c.done }}/{{ c.total }} task xong</div></div>
       </div>

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Sơ đồ {{ ms.key if ms else '' }} · {{ p.name }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/graph.css">{% endblock %}
+{% block body %}
+<div class="row" style="justify-content:space-between;margin-bottom:10px">
+  <div><div class="muted small"><a href="/projects/{{ p.slug }}">{{ p.name }}</a></div>
+    <h1 style="margin:0">Sơ đồ {{ ms.key if ms else '' }}</h1></div>
+  <form method="get" class="row"><select name="m" onchange="this.form.submit()">
+    {% for m in milestones %}<option value="{{ m.id }}" {{ 'selected' if ms and m.id == ms.id }}>{{ m.key }} · {{ m.status }}</option>{% endfor %}
+  </select></form>
+</div>
+<div class="flow-wrap">
+  {% if ms %}
+  <div id="flow" class="flow" data-src="/api/projects/{{ p.slug }}/graph?m={{ ms.id }}" data-key="{{ p.slug }}:{{ ms.id }}">
+    <div class="canvas"><svg class="edges"></svg></div>
+    <div class="tools"><button id="fit" title="Vừa khung">⤢</button><button id="zin">+</button><button id="zout">−</button>
+      <button id="relayout">Sắp xếp lại</button><button id="showall">Hiện task đã huỷ</button></div>
+    <div class="hint">kéo nền để di chuyển · cuộn để phóng to · kéo node để sắp xếp</div>
+  </div>
+  {% else %}<div class="card empty">Dự án chưa có milestone. Giao việc mới ở ô bên cạnh.</div>{% endif %}
+  <div class="side">
+    <section class="card panel" id="panel"><h3>Chọn một node</h3><p class="muted small">Bấm vào task để xem trạng thái, review mới nhất và link chi tiết.</p></section>
+    {{ ui.command_box(p, thread, sent, '/projects/' ~ p.slug ~ '/graph') }}
+  </div>
+</div>
+<script src="/static/graph.js"></script>
+{% endblock %}

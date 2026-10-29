@@ -1,0 +1,51 @@
+/* Milestone flow canvas (n8n-style): pan, zoom, drag nodes, side panel. */
+.flow-wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;align-items:stretch}
+@media (max-width:1000px){.flow-wrap{grid-template-columns:1fr}.flow{height:62vh;min-height:360px}.flow .hint{display:none}}
+.flow{position:relative;height:calc(100vh - 210px);min-height:460px;border:1px solid var(--line);border-radius:12px;overflow:hidden;
+  background-color:var(--panel2);background-image:radial-gradient(color-mix(in srgb,var(--muted) 35%,transparent) 1px,transparent 1px);
+  background-size:22px 22px;cursor:grab;touch-action:none;user-select:none}
+.flow.panning{cursor:grabbing}
+.flow .canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+.flow svg.edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.flow svg.edges path{fill:none;stroke:color-mix(in srgb,var(--muted) 70%,transparent);stroke-width:2}
+.flow svg.edges path.done{stroke:var(--ok)}
+.flow svg.edges path.active{stroke:var(--accent);stroke-dasharray:7 6;animation:flowdash .9s linear infinite}
+@keyframes flowdash{to{stroke-dashoffset:-13}}
+.fnode{position:absolute;width:228px;min-height:88px;background:var(--panel);border:1.5px solid var(--line);border-radius:12px;
+  box-shadow:0 2px 6px rgba(16,24,40,.08);cursor:pointer;display:flex;overflow:visible}
+.fnode:hover{border-color:var(--accent)}
+.fnode.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.fnode .ico{flex:none;width:40px;display:flex;align-items:center;justify-content:center;font-size:18px;border-radius:10px 0 0 10px;
+  background:var(--panel2);border-right:1px solid var(--line)}
+.fnode .bd{flex:1;min-width:0;padding:8px 10px}
+.fnode .t{font-weight:650;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fnode .s{color:var(--muted);font-size:12px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:1px}
+.fnode .chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.fnode .chips .chip{font-size:11px;padding:0 7px}
+.fnode .port{position:absolute;top:50%;width:10px;height:10px;margin-top:-5px;border-radius:50%;background:var(--panel);border:2px solid var(--muted)}
+.fnode .port.in{left:-6px}.fnode .port.out{right:-6px}
+.fnode.k-goal .ico{background:var(--accent-soft)}.fnode.k-lead .ico{background:var(--rev-soft)}
+.fnode.k-integration .ico,.fnode.k-pr .ico{background:var(--ok-soft)}
+.fnode.b-done{border-color:color-mix(in srgb,var(--ok) 60%,var(--line))}.fnode.b-done .ico{background:var(--ok-soft)}
+.fnode.b-running .ico{background:var(--accent-soft)}.fnode.b-review .ico{background:var(--rev-soft)}
+.fnode.b-revising .ico{background:var(--warn-soft)}.fnode.b-blocked{border-color:var(--bad)}.fnode.b-blocked .ico{background:var(--bad-soft)}
+.fnode.b-cancelled{opacity:.45}
+.fnode.live::after{content:"";position:absolute;inset:-5px;border-radius:15px;border:2px solid var(--accent);opacity:.55;animation:pulse 1.6s ease-in-out infinite;pointer-events:none}
+@keyframes pulse{50%{opacity:.1}}
+.flow .tools{position:absolute;left:12px;bottom:12px;display:flex;gap:6px;z-index:2}
+.flow .tools button{padding:4px 10px;background:var(--panel)}
+.flow .hint{position:absolute;right:12px;bottom:12px;color:var(--muted);font-size:11px;z-index:2;background:var(--panel);padding:2px 8px;border-radius:6px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.side .card{padding:14px}
+.panel h3{margin:0 0 4px;font-size:15px}
+.panel .kv{display:grid;grid-template-columns:90px 1fr;gap:4px 10px;font-size:13px;margin:10px 0}
+.panel .kv div:nth-child(odd){color:var(--muted)}
+.panel pre{max-height:220px;font-size:12px}
+.thread{list-style:none;margin:0;padding:0;max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.thread li{padding:8px 10px;border-radius:10px;font-size:13px;background:var(--panel2);max-width:92%}
+.thread li.owner{align-self:flex-end;background:var(--accent-soft)}
+.thread li .h{font-size:11px;color:var(--muted);margin-bottom:2px}
+.cmd textarea{min-height:70px}
+.cmd .modes{display:flex;gap:6px;margin:8px 0}
+.cmd .modes label{display:flex;gap:5px;align-items:center;padding:4px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;cursor:pointer}
+.cmd .modes input{margin:0}

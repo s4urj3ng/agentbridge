@@ -17,13 +17,15 @@ import asyncio
 import hashlib
 import hmac
 import json
+import shlex
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+import yaml
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -33,8 +35,11 @@ from .integrations.github import record_delivery, verify_signature
 from .orchestrator import events as evq
 from .orchestrator import quota
 from .orchestrator.engine import Engine
+from .policies.manifest import Manifest
 from .policies.safety import PolicyViolation, read_confined, redact
 
+STATIC_DIR = Path(__file__).parent / "dashboard" / "static"
+STATIC_FILES = {"graph.js": "text/javascript", "graph.css": "text/css"}
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "dashboard" / "templates"))
 SESSION_TTL = 12 * 3600
 LOGIN_WINDOW_S, LOGIN_MAX_FAILURES = 15 * 60, 5     # per client IP
@@ -466,7 +471,37 @@ def create_app(settings: Settings) -> FastAPI:
         return page(request, "projects.html", projects=q(
             "SELECT p.*, (SELECT COUNT(*) FROM milestones m WHERE m.project_id=p.id) nm, "
             "(SELECT COUNT(*) FROM tasks t WHERE t.project_id=p.id AND t.state NOT IN ('COMPLETED','CANCELLED','FAILED')) open "
-            "FROM projects p ORDER BY p.id"))
+            "FROM projects p ORDER BY p.id"),
+            requests=q("SELECT id, kind, slug, git_url, status, error, created_at FROM project_requests "
+                       "ORDER BY id DESC LIMIT 10"))
+
+    @app.get("/projects/new", response_class=HTMLResponse)
+    def project_new_page(request: Request, actor: str = Depends(auth)):
+        return page(request, "project_new.html", choices=agent_choices(), error="", f={})
+
+    @app.post("/projects/new", response_class=HTMLResponse)
+    async def project_new(request: Request, actor: str = Depends(auth)):
+        form = await request.form()
+        git_url = str(form.get("git_url") or "").strip()
+        try:
+            data = manifest_from_form(form)
+            m = check_manifest(data, "/pending")
+            if not git_url:
+                raise ValueError("cần link git (https://…, git@…) hoặc đường dẫn repo có sẵn trên server")
+            if row(conn, "SELECT 1 FROM projects WHERE slug=?", m.project.slug) or row(
+                    conn, "SELECT 1 FROM project_requests WHERE slug=? AND status='PENDING'", m.project.slug):
+                raise ValueError(f"đã có dự án {m.project.slug}")
+        except (ValueError, yaml.YAMLError) as e:
+            return page(request, "project_new.html", choices=agent_choices(), error=str(e)[:1500],
+                        f=dict(form) | {"workers": form.getlist("workers"), "reviewers": form.getlist("reviewers")})
+        data["project"].pop("repo_path", None)
+        with tx(conn):
+            conn.execute("INSERT INTO project_requests (kind, slug, git_url, manifest_json, first_goal, requested_by, "
+                         "created_at) VALUES ('create',?,?,?,?,?,?)",
+                         (m.project.slug, git_url, json.dumps(data), str(form.get("first_goal") or "").strip() or None,
+                          actor, now_iso()))
+            audit(conn, actor, "project.request", slug=m.project.slug)
+        return RedirectResponse("/projects", status_code=303)
 
     @app.get("/projects/{slug}", response_class=HTMLResponse)
     def project_page(request: Request, slug: str, actor: str = Depends(auth)):
@@ -479,7 +514,12 @@ def create_app(settings: Settings) -> FastAPI:
             m_["progress"] = views.milestone_progress(conn, m_["id"])
             m_["graph"] = dep_graph_svg(m_["id"])
         manifest = jload(p["manifest_json"], {})
+        shown = json.loads(json.dumps(manifest))
+        shown.get("project", {}).pop("repo_path", None)
         return page(request, "project.html", p=dict(p), milestones=ms, manifest=manifest,
+                    manifest_yaml=yaml.safe_dump(shown, sort_keys=False, allow_unicode=True),
+                    thread=views.command_thread(conn, p["id"]), sent=request.query_params.get("sent", ""),
+                    saved=request.query_params.get("saved", ""),
                     context=q("SELECT * FROM project_context WHERE project_id=? AND active=1 ORDER BY id DESC LIMIT 40",
                               p["id"]))
 
@@ -498,6 +538,127 @@ def create_app(settings: Settings) -> FastAPI:
             conn.execute("UPDATE projects SET paused=1-paused WHERE slug=?", (slug,))
             audit(conn, actor, "project.toggle_pause", slug=slug)
         return RedirectResponse(f"/projects/{slug}", status_code=303)
+
+    # ------------------------------------------------------------ graph, command box, projects from the web
+    @app.get("/static/{name}")
+    def static_file(name: str):
+        if name not in STATIC_FILES:
+            raise HTTPException(404)
+        return FileResponse(STATIC_DIR / name, media_type=STATIC_FILES[name],
+                            headers={"Cache-Control": "no-cache"})
+
+    def milestone_of(slug: str, mid: int | None) -> tuple[dict, dict | None]:
+        p = row(conn, "SELECT * FROM projects WHERE slug=?", slug)
+        if p is None:
+            raise HTTPException(404)
+        ms = row(conn, "SELECT * FROM milestones WHERE project_id=? AND id=?", p["id"], mid) if mid else (
+            row(conn, "SELECT * FROM milestones WHERE project_id=? AND status IN ('ACTIVE','BLOCKED',"
+                      "'AWAITING_APPROVAL') ORDER BY id DESC LIMIT 1", p["id"])
+            or row(conn, "SELECT * FROM milestones WHERE project_id=? ORDER BY id DESC LIMIT 1", p["id"]))
+        if mid and ms is None:
+            raise HTTPException(404)
+        return dict(p), dict(ms) if ms else None
+
+    @app.get("/api/projects/{slug}/graph")
+    def api_graph(slug: str, m: int | None = None, all: int = 0, actor: str = Depends(auth)):
+        p, ms = milestone_of(slug, m)
+        if ms is None:
+            return {"milestone": None, "nodes": [], "edges": []}
+        return views.graph_data(conn, ms["id"], include_cancelled=bool(all))
+
+    @app.get("/projects/{slug}/graph", response_class=HTMLResponse)
+    def graph_page(request: Request, slug: str, m: int | None = None, actor: str = Depends(auth)):
+        p, ms = milestone_of(slug, m)
+        return page(request, "graph.html", p=p, ms=ms, thread=views.command_thread(conn, p["id"]),
+                    milestones=q("SELECT id, key, status FROM milestones WHERE project_id=? ORDER BY id DESC", p["id"]),
+                    sent=request.query_params.get("sent", ""))
+
+    @app.post("/projects/{slug}/command")
+    async def project_command(request: Request, slug: str, actor: str = Depends(auth)):
+        form = await request.form()
+        text, mode = str(form.get("text", "")).strip(), str(form.get("mode", "note"))
+        back = str(form.get("back") or f"/projects/{slug}/graph")
+        if not back.startswith(f"/projects/{slug}"):
+            back = f"/projects/{slug}/graph"
+        if len(text) < 3:
+            raise HTTPException(400, "nội dung quá ngắn")
+        try:
+            if mode == "goal":
+                engine.submit_goal(slug, text, str(form.get("milestone") or "") or None, actor=actor)
+                sent = "goal"
+            else:
+                sent = "note" if engine.owner_note(slug, text, actor=actor) else "stored"
+        except (PolicyViolation, ValueError) as e:
+            raise HTTPException(403, str(e))
+        return RedirectResponse(back.split("?")[0] + f"?sent={sent}", status_code=303)
+
+    def agent_choices() -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {"tech_lead": [], "worker": [], "reviewer": []}
+        agents = rows(conn, "SELECT id, provider, roles_json FROM agents WHERE enabled=1 ORDER BY id")
+        if any(a["provider"] != "mock" for a in agents):     # test doubles only when nothing real is set up
+            agents = [a for a in agents if a["provider"] != "mock"]
+        for a in agents:
+            for r in jload(a["roles_json"], []):
+                out.setdefault(r, []).append(a["id"])
+        return out
+
+    def check_manifest(data: dict, repo_path: str) -> Manifest:
+        data = dict(data)
+        data["project"] = dict(data.get("project") or {}) | {"repo_path": repo_path}
+        m = Manifest.model_validate(data)
+        known = {a["id"] for a in rows(conn, "SELECT id FROM agents")}
+        unknown = [a for a in [m.project.tech_lead, m.project.default_worker, *m.project.workers, *m.project.reviewers]
+                   if a not in known]
+        if unknown:
+            raise ValueError(f"agent không tồn tại: {', '.join(unknown)}")
+        bad = [c[0] for c in m.validation.commands.values() if c and Path(c[0]).name not in settings.validation_executables]
+        if bad:
+            raise ValueError(f"lệnh test không được phép: {', '.join(bad)} (cho phép: "
+                             f"{', '.join(settings.validation_executables)})")
+        return m
+
+    def manifest_from_form(form) -> dict:
+        if str(form.get("yaml") or "").strip():
+            data = yaml.safe_load(str(form["yaml"])) or {}
+            if not isinstance(data, dict):
+                raise ValueError("YAML phải là một mapping")
+            return data
+        cmd = str(form.get("test_cmd") or "").strip()
+        data = {"project": {"slug": str(form.get("slug", "")).strip(), "name": str(form.get("name", "")).strip(),
+                            "base_branch": str(form.get("base_branch") or "main").strip(),
+                            "tech_lead": str(form.get("tech_lead", "")), "default_worker": str(form.get("worker", "")),
+                            "workers": [w for w in form.getlist("workers") if w != form.get("worker")],
+                            "reviewers": list(form.getlist("reviewers")),
+                            "review_policy": str(form.get("review_policy") or "always")},
+                "validation": {"commands": {"test": shlex.split(cmd)} if cmd else {},
+                               "default": ["test"] if cmd else [], "timeout_s": 900},
+                "policy": {"hardware_policy": "STRICT_NO_GO" if form.get("hardware_strict") else "none",
+                           "auto_start": True, "autonomous": bool(form.get("autonomous")),
+                           "draft_pr": str(form.get("draft_pr") or "approval")},
+                "charter": str(form.get("charter") or "").strip(),
+                "context": [c.strip() for c in str(form.get("context") or "").splitlines() if c.strip()]}
+        return data
+
+    @app.post("/projects/{slug}/config", response_class=HTMLResponse)
+    async def project_config(request: Request, slug: str, actor: str = Depends(auth)):
+        p = row(conn, "SELECT * FROM projects WHERE slug=?", slug)
+        if p is None:
+            raise HTTPException(404)
+        form = await request.form()
+        try:
+            data = yaml.safe_load(str(form.get("yaml") or "")) or {}
+            if not isinstance(data, dict):
+                raise ValueError("YAML phải là một mapping")
+            data.setdefault("project", {})["slug"] = slug
+            check_manifest(data, p["repo_path"])
+        except (ValueError, yaml.YAMLError) as e:
+            raise HTTPException(400, f"cấu hình không hợp lệ: {str(e)[:1500]}")
+        data["project"].pop("repo_path", None)
+        with tx(conn):
+            conn.execute("INSERT INTO project_requests (kind, slug, manifest_json, requested_by, created_at) "
+                         "VALUES ('update',?,?,?,?)", (slug, json.dumps(data), actor, now_iso()))
+            audit(conn, actor, "project.request", slug=slug, kind="update")
+        return RedirectResponse(f"/projects/{slug}?saved=1", status_code=303)
 
     @app.get("/tasks/{task_id}", response_class=HTMLResponse)
     def task_page(request: Request, task_id: int, actor: str = Depends(auth)):

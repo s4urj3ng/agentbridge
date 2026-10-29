@@ -1,10 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Dự án · AgentBridge{% endblock %}
 {% block body %}
-<h1>Dự án</h1>
-<p class="sub">Các repo AgentBridge đang quản lý.</p>
-<div class="card scroll"><table><tr><th>Dự án</th><th>Repo</th><th>Nhánh gốc</th><th>Milestone</th><th>Task đang mở</th><th>Trạng thái</th></tr>
-{% for p in projects %}<tr><td><a href="/projects/{{ p.slug }}"><b>{{ p.name }}</b></a><div class="muted small">{{ p.slug }}</div></td><td><code>{{ p.repo_path }}</code><div class="muted small">{{ p.remote_url or 'không có remote' }}</div></td><td>{{ p.base_branch }}</td><td>{{ p.nm }}</td><td>{{ p.open }}</td><td><span class="chip {{ 'warn' if p.paused else 'ok' }}">{{ 'tạm dừng' if p.paused else 'đang chạy' }}</span></td></tr>
-{% else %}<tr><td colspan="6" class="muted">Chưa có dự án. Đăng ký bằng <code>agentbridge project add manifest.yaml</code>.</td></tr>{% endfor %}
-</table></div>
+<div class="row" style="justify-content:space-between"><div><h1>Dự án</h1><p class="sub">Các repo AgentBridge đang quản lý.</p></div>
+<a href="/projects/new"><button class="primary">+ Thêm dự án</button></a></div>
+{% if requests %}<div class="card" style="margin-bottom:12px"><h2 style="margin:0 0 6px">Yêu cầu gần đây</h2><table>
+{% for r in requests %}<tr><td><b>{{ r.slug }}</b> <span class="muted small">{{ 'thêm mới' if r.kind == 'create' else 'sửa cấu hình' }}</span></td>
+<td><span class="chip {{ 'ok' if r.status == 'DONE' else ('bad' if r.status == 'FAILED' else 'info') }}">{{ {'DONE': 'xong', 'FAILED': 'lỗi', 'PENDING': 'đang xử lý'}[r.status] }}</span></td>
+<td class="muted small">{{ r.error or (r.git_url or '') }}</td><td class="muted small">{{ t(r.created_at) }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+<div class="grid cols">
+{% for p in projects %}<a class="card" href="/projects/{{ p.slug }}/graph" style="color:inherit;text-decoration:none">
+  <div class="row" style="justify-content:space-between"><b style="font-size:15px">{{ p.name }}</b><span class="chip {{ 'warn' if p.paused else 'ok' }}">{{ 'tạm dừng' if p.paused else 'đang chạy' }}</span></div>
+  <div class="muted small">{{ p.slug }} · {{ p.remote_url or p.repo_path }}</div>
+  <div class="row" style="margin-top:10px"><span class="chip">{{ p.nm }} milestone</span><span class="chip info">{{ p.open }} task đang mở</span><span class="chip">nhánh {{ p.base_branch }}</span></div>
+  <div class="muted small" style="margin-top:8px">Mở sơ đồ →</div>
+</a>
+{% else %}<div class="card empty">Chưa có dự án. Bấm <b>+ Thêm dự án</b>.</div>{% endfor %}
+</div>
+{% if requests %}<script>liveRefresh(10)</script>{% endif %}
 {% endblock %}

@@ -42,3 +42,27 @@
   {% else %}<div class="muted small" style="margin-top:4px">Nhà cung cấp chưa báo số quota.</div>{% endfor %}
 </div>
 {% endmacro %}
+
+{% macro command_box(p, thread, sent, back) %}
+<section class="card cmd">
+  <h2 style="margin:0 0 6px">Chỉ đạo Tech Lead</h2>
+  {% if sent == 'goal' %}<div class="chip ok">Đã gửi goal mới, Tech Lead sẽ lập kế hoạch và tạo job.</div>
+  {% elif sent == 'note' %}<div class="chip ok">Đã gửi chỉ thị cho milestone đang chạy.</div>
+  {% elif sent == 'stored' %}<div class="chip warn">Không có milestone nào đang chạy: chỉ thị được lưu làm quy tắc cho lần sau.</div>{% endif %}
+  <ul class="thread" style="margin-top:8px">
+    {% for i in thread %}<li class="{{ i.who }}"><div class="h">{{ 'Bạn' if i.who == 'owner' else 'Tech Lead' }} · {{ i.kind }}{% if i.milestone %} · {{ i.milestone }}{% endif %} · {{ t(i.at) }}</div>{{ i.text }}</li>
+    {% else %}<li class="empty">Chưa có trao đổi nào.</li>{% endfor %}
+  </ul>
+  <form method="post" action="/projects/{{ p.slug }}/command" style="margin-top:10px">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
+    <textarea name="text" required minlength="3" placeholder="Ví dụ: Thêm test cho module X rồi viết tài liệu. / Dừng sửa file Y, ưu tiên task Z."></textarea>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="note" checked> Chỉ thị cho milestone đang chạy</label>
+      <label><input type="radio" name="mode" value="goal"> Giao việc mới (milestone mới)</label>
+    </div>
+    <div class="row"><input name="milestone" placeholder="Tên milestone (khi giao việc mới)" style="flex:1;min-width:0"><button class="primary">Gửi</button></div>
+  </form>
+  <script>document.querySelectorAll('.thread').forEach(t => t.scrollTop = t.scrollHeight)</script>
+  <p class="muted small" style="margin:8px 0 0">Tech Lead đọc lệnh này ở lần gọi kế tiếp, rồi tự tạo, giao, sửa hoặc huỷ task. Lệnh vẫn phải theo chính sách phần cứng của dự án.</p>
+</section>
+{% endmacro %}

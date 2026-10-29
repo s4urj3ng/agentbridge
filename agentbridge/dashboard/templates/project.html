@@ -2,7 +2,9 @@
 {% import "_macros.html" as ui with context %}
 {% block title %}{{ p.name }} · AgentBridge{% endblock %}
 {% block body %}
-<h1>{{ p.name }} <span class="chip">{{ 'tạm dừng' if p.paused else 'đang chạy' }}</span></h1>
+<div class="row" style="justify-content:space-between"><h1>{{ p.name }} <span class="chip">{{ 'tạm dừng' if p.paused else 'đang chạy' }}</span></h1>
+<a href="/projects/{{ p.slug }}/graph"><button class="primary">Mở sơ đồ</button></a></div>
+{% if saved %}<div class="chip ok" style="margin-bottom:10px">Đã gửi cấu hình mới; engine áp dụng trong vài giây (xem trang Dự án nếu có lỗi).</div>{% endif %}
 <div class="grid cols">
   <div class="card"><div class="muted">Repo</div><code>{{ p.repo_path }}</code><div class="muted">{{ p.remote_url or 'không có remote' }} · nhánh gốc {{ p.base_branch }}</div></div>
   <div class="card"><div class="muted">Tech Lead</div>{{ manifest.project.tech_lead }}<div class="muted">workers: {{ ([manifest.project.default_worker] + manifest.project.workers)|join(', ') }}</div><div class="muted">reviewers: {{ manifest.project.reviewers|join(', ') or 'none' }} ({{ manifest.project.review_policy }})</div></div>
@@ -11,10 +13,7 @@
 <div class="row" style="margin-top:12px">
 <form method="post" action="/projects/{{ p.slug }}/toggle"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ 'Chạy lại' if p.paused else 'Tạm dừng' }} dự án</button></form>
 </div>
-<h2>Gửi goal mới</h2>
-<form class="card" method="post" action="/projects/{{ p.slug }}/goal"><input type="hidden" name="csrf" value="{{ csrf }}">
-<textarea name="goal" placeholder="Mục tiêu cho Tech Lead" required></textarea>
-<div class="row" style="margin-top:8px"><input name="milestone" placeholder="Milestone key (không bắt buộc)"><button class="primary">Gửi</button></div></form>
+<div style="margin-top:14px">{{ ui.command_box(p, thread, sent, '/projects/' ~ p.slug) }}</div>
 {% for m in milestones %}
 <h2>Milestone {{ m.key }} <span class="chip">{{ m.status }}</span></h2>
 <div class="card">
@@ -22,11 +21,16 @@
 <div style="margin-top:8px">{{ ui.progress(m.progress) }}</div>{{ ui.legend(m.progress) }}{% endif %}
 <details><summary class="muted small">Goal của milestone</summary><p style="white-space:pre-wrap">{{ m.goal }}</p></details>
 <p class="muted">nhánh tích hợp: <code>{{ m.integration_branch or '—' }}</code>{% if m.pr_url %} · <a href="{{ m.pr_url }}">draft PR</a>{% endif %} · số lần gọi Tech Lead: {{ m.tl_invocations }}</p>
-{% if m.graph %}<div class="scroll">{{ m.graph|safe }}</div>{% endif %}
+{% if m.graph %}<div class="scroll">{{ m.graph|safe }}</div><a class="small" href="/projects/{{ p.slug }}/graph?m={{ m.id }}">Mở sơ đồ tương tác →</a>{% endif %}
 <table><tr><th>Task</th><th>Trạng thái</th><th>Worker</th><th>Lần sửa</th><th>Chạy lại test</th></tr>
 {% for t in m.tasks %}<tr><td><a href="/tasks/{{ t.id }}">#{{ t.id }} {{ t.key }}</a> {{ t.title }}</td><td class="st-{{ t.state }}">{{ STATE_VI.get(t.state, t.state) }}</td><td>{{ t.assignee }}</td><td>{{ t.revision_count }}</td><td>{{ t.validation_retries }}</td></tr>{% endfor %}
 </table></div>
 {% endfor %}
+<h2>Cấu hình dự án</h2>
+<form class="card" method="post" action="/projects/{{ p.slug }}/config"><input type="hidden" name="csrf" value="{{ csrf }}">
+<p class="muted small" style="margin-top:0">Sửa đội agent, lệnh test, chính sách… ngay tại đây; không cần sửa code hay deploy. Engine kiểm tra rồi áp dụng cho các lần giao việc tiếp theo.</p>
+<textarea name="yaml" class="mono" style="min-height:300px">{{ manifest_yaml }}</textarea>
+<div class="row" style="margin-top:8px"><button class="primary">Lưu cấu hình</button></div></form>
 <h2>Bối cảnh dự án</h2>
 <div class="card scroll"><table>{% for c in context %}<tr><td class="muted">{{ c.kind }}</td><td>{{ c.content }}</td></tr>{% endfor %}</table></div>
 {% endblock %}

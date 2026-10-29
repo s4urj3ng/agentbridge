@@ -91,7 +91,9 @@ svg.graph{max-width:100%;height:auto}svg .edge{fill:none;stroke:var(--muted);str
 svg rect.node{fill:var(--panel);stroke:var(--line);stroke-width:1.5}svg rect.st-COMPLETED{stroke:var(--ok)}svg rect.st-BLOCKED,svg rect.st-FAILED{stroke:var(--bad)}
 svg rect.st-RUNNING,svg rect.st-VALIDATING,svg rect.st-REVIEW_PENDING{stroke:var(--warn)}svg text{fill:var(--fg);font-size:12px}svg text.ns{fill:var(--muted);font-size:11px}
 @media (max-width:640px){main{padding:14px}.tasks .title{display:none}.tasks li{flex-wrap:wrap}.feed li{flex-wrap:wrap}header.top{padding:10px 14px}.top .right{width:100%;margin-left:0}.win{grid-template-columns:28px 1fr auto}}
+main.wide{max-width:none}
 </style>
+{% block head %}{% endblock %}
 </head>
 <body>
 <header class="top">
@@ -99,7 +101,7 @@ svg rect.st-RUNNING,svg rect.st-VALIDATING,svg rect.st-REVIEW_PENDING{stroke:var
   {% if nav != 'login' %}
   <nav class="tabs">
     {% for href, label, key in [("/", "Tổng quan", "overview"), ("/projects", "Dự án", "projects"), ("/agents", "Agent & quota", "agents"), ("/approvals", "Chờ duyệt", "approvals"), ("/settings", "Cài đặt", "settings")] %}
-    <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task')) else '' }}">{{ label }}{% if key == 'approvals' and pending %}<span class="badge">{{ pending }}</span>{% endif %}</a>
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task','graph','project_new')) else '' }}">{{ label }}{% if key == 'approvals' and pending %}<span class="badge">{{ pending }}</span>{% endif %}</a>
     {% endfor %}
   </nav>
   <div class="right">
@@ -108,7 +110,7 @@ svg rect.st-RUNNING,svg rect.st-VALIDATING,svg rect.st-REVIEW_PENDING{stroke:var
   </div>
   {% endif %}
 </header>
-<main id="live-root">{% block body %}{% endblock %}</main>
+<main id="live-root" class="{% block main_class %}{% endblock %}">{% block body %}{% endblock %}</main>
 <script>
 // Pages that call liveRefresh(seconds) re-render in place; paused while you type in a field.
 function liveRefresh(sec){

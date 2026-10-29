@@ -16,6 +16,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -32,7 +33,7 @@ from ..integrations.github import GitHubClient, GitHubError, repo_slug_from_url
 from ..policies.manifest import Manifest
 from ..policies.safety import (PolicyViolation, hardware_no_go_hits, is_protected_branch, redact)
 from ..workers import process
-from ..workers.git_ops import GitError, GitWorkspace, slugify
+from ..workers.git_ops import GitError, GitWorkspace, git, slugify
 from ..workers.validation import run_validation
 from . import events as evq
 from . import overrides, quota
@@ -405,6 +406,7 @@ class Engine:
         busy |= self._dispatch()
         busy |= self._dispatch_reviews()
         busy |= self._resume_stuck()
+        busy |= self._start_project_requests()
         self._maybe_probe_quota()
         await asyncio.sleep(0)
         return busy
@@ -420,6 +422,55 @@ class Engine:
         if not row(self.conn, "SELECT 1 FROM agents WHERE enabled=1 AND provider IN ('antigravity','codex')"):
             return
         self._spawn_job("quota-probe", asyncio.to_thread(refresh_free_quotas, self.s))
+
+    # ================================================================ projects from the dashboard
+    def _start_project_requests(self) -> bool:
+        busy = False
+        for r in rows(self.conn, "SELECT id FROM project_requests WHERE status='PENDING' ORDER BY id"):
+            key = f"project_request:{r['id']}"
+            if key not in self.jobs:
+                self._spawn_job(key, self._apply_project_request(r["id"]))
+                busy = True
+        return busy
+
+    async def _apply_project_request(self, req_id: int) -> None:
+        """Clone (create) and register a project the owner configured on the dashboard."""
+        r = row(self.conn, "SELECT * FROM project_requests WHERE id=?", req_id)
+        try:
+            data = jload(r["manifest_json"], {})
+            if r["kind"] == "create":
+                if row(self.conn, "SELECT 1 FROM projects WHERE slug=?", r["slug"]):
+                    raise ValueError(f"project {r['slug']} already exists")
+                url = (r["git_url"] or "").strip()
+                if url.startswith("/"):
+                    dest = Path(url)                      # an existing checkout on this server
+                else:
+                    if not re.match(r"^(https://|git@|ssh://)[^\s]+$", url):
+                        raise ValueError("git URL must start with https://, ssh:// or git@")
+                    dest = self.s.project_repos_dir / r["slug"]
+                    if not dest.exists():
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        await asyncio.to_thread(git, dest.parent, "clone", "--", url, str(dest), timeout=900)
+                    data["project"].setdefault("remote_url", url if "github.com" in url else None)
+                data["project"]["repo_path"] = str(dest)
+            else:
+                p = row(self.conn, "SELECT * FROM projects WHERE slug=?", r["slug"])
+                if p is None:
+                    raise ValueError(f"unknown project {r['slug']}")
+                data["project"].update(slug=p["slug"], repo_path=p["repo_path"])
+            pid = self.register_project(Manifest.model_validate(data))
+            if r["first_goal"]:
+                self.submit_goal(r["slug"], r["first_goal"], actor=r["requested_by"])
+            with tx(self.conn):
+                self.conn.execute("UPDATE project_requests SET status='DONE', processed_at=? WHERE id=?",
+                                  (now_iso(), req_id))
+                audit(self.conn, r["requested_by"], f"project.{r['kind']}", project_id=pid, slug=r["slug"])
+        except Exception as e:
+            with tx(self.conn):
+                self.conn.execute("UPDATE project_requests SET status='FAILED', error=?, processed_at=? WHERE id=?",
+                                  (redact(str(e))[:2000], now_iso(), req_id))
+                audit(self.conn, r["requested_by"], "project.request_failed", slug=r["slug"],
+                      error=redact(str(e))[:500])
 
     def _spawn_job(self, key: str, coro) -> None:
         async def wrapped():

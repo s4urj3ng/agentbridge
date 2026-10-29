@@ -54,6 +54,7 @@ class Settings:
     ])
     protected_branches: list[str] = field(default_factory=lambda: [
         "main", "master", "release/*", "production", "stable"])
+    repos_dir: Path | None = None        # where projects added from the dashboard are cloned
 
     @property
     def db_path(self) -> Path:
@@ -66,6 +67,10 @@ class Settings:
     @property
     def workspaces_dir(self) -> Path:
         return self.data_dir / "worktrees"
+
+    @property
+    def project_repos_dir(self) -> Path:
+        return self.repos_dir or self.data_dir / "repos"
 
     @property
     def admin_token(self) -> str | None:
@@ -159,4 +164,6 @@ def load_settings(config_file: str | os.PathLike | None = None,
         s.validation_executables = list(raw["validation_executables"])
     if raw.get("protected_branches"):
         s.protected_branches = list(raw["protected_branches"])
+    if raw.get("repos_dir"):
+        s.repos_dir = Path(raw["repos_dir"])
     return s
