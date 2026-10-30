@@ -156,31 +156,37 @@ class GitWorkspace:
         if not self.overlay or not self.overlay.is_dir():
             return 0
         added, rels = 0, []
+        for rel in self._overlay_files():
+            rels.append(rel.as_posix())
+            src, dst = self.overlay / rel, path / rel
+            if dst.exists() or dst.is_symlink():
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_symlink():
+                dst.symlink_to(os.readlink(src))
+            elif src.stat().st_mode & 0o222:
+                shutil.copy2(src, dst)
+            else:
+                try:
+                    os.link(src, dst)
+                except OSError:
+                    shutil.copy2(src, dst)
+            added += 1
+        self._write_overlay_excludes(rels)
+        return added
+
+    def _overlay_files(self) -> list[Path]:
+        """Overlay paths relative to its root: files and symlinks (a symlinked directory is one entry)."""
+        if not self.overlay or not self.overlay.is_dir():
+            return []
+        out = []
         for top, dirs, files in os.walk(self.overlay):
             for name in list(dirs):
                 if (Path(top) / name).is_symlink():
                     dirs.remove(name)
                     files.append(name)
-            for name in files:
-                src = Path(top) / name
-                rel = src.relative_to(self.overlay)
-                rels.append(rel.as_posix())
-                dst = path / rel
-                if dst.exists() or dst.is_symlink():
-                    continue
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if src.is_symlink():
-                    dst.symlink_to(os.readlink(src))
-                elif src.stat().st_mode & 0o222:
-                    shutil.copy2(src, dst)
-                else:
-                    try:
-                        os.link(src, dst)
-                    except OSError:
-                        shutil.copy2(src, dst)
-                added += 1
-        self._write_overlay_excludes(rels)
-        return added
+            out += [(Path(top) / name).relative_to(self.overlay) for name in files]
+        return out
 
     def _write_overlay_excludes(self, rels: list[str]) -> None:
         common = Path(git(self.repo, "rev-parse", "--git-common-dir"))
@@ -235,6 +241,13 @@ class GitWorkspace:
         if not dirty(path):
             return None
         git(path, "add", "-A", "--", ".", *GENERATED_EXCLUDES)
+        # overlay files are never committed, even if an ignore rule went missing or a worker forced them in
+        overlay = {r.as_posix() for r in self._overlay_files()}
+        swept = [f for f in git(path, "diff", "--cached", "--name-only", "--diff-filter=A").splitlines() if f in overlay]
+        if swept:
+            git(path, "reset", "-q", "--", *swept)
+        if not git(path, "diff", "--cached", "--name-only"):
+            return None
         git(path, "commit", "-q", "--no-verify", "-m", message)
         return git(path, "rev-parse", "HEAD")
 

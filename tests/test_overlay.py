@@ -61,3 +61,14 @@ def test_overlay_reaches_workers_and_never_lands_in_commits(settings, tmp_path):
     assert files and not [f for f in files if f.startswith(("firmware/", "tools/", "toolchains"))]
     wt = q(e, "SELECT worktree_path FROM tasks WHERE milestone_id=? LIMIT 1", mid)[0]["worktree_path"]
     assert wt is None or not os.path.exists(wt) or os.path.exists(os.path.join(wt, "tools", "build_local.py"))
+
+
+def test_overlay_files_never_committed_even_without_ignore_rule(tmp_path):
+    repo = create_demo_repo(tmp_path / "repo")
+    ws = GitWorkspace(repo, tmp_path / "wt", ["main"], overlay=_overlay(tmp_path))
+    path = ws.create_worktree(tmp_path / "wt" / "p" / "t1", "agentbridge/p/m/t1", git(repo, "rev-parse", "main"))
+    (repo / ".git" / "info" / "exclude").write_text("")              # the ignore rule is lost
+    assert ws.commit_all(path, "nothing but overlay files") is None
+    (path / "notes.md").write_text("real work\n")
+    assert ws.commit_all(path, "work")
+    assert git(path, "show", "--name-only", "--format=", "HEAD").split() == ["notes.md"]
