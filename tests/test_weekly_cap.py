@@ -26,7 +26,8 @@ def test_weekly_left_or_stale_keeps_five_hour():
     two_left = {"windows": {"five_hour": {"used_pct": 10.0}, "seven_day": {"used_pct": 98.0, "resets_at": LATER}}}
     w = effective_windows(two_left, NOW)
     assert w["five_hour"]["used_pct"] == 100.0 and w["seven_day"]["status"] == "rejected"
-    assert w["seven_day"]["used_pct"] == 98.0                       # the real number stays visible
+    assert w["seven_day"]["used_pct"] == 100.0 and w["seven_day"]["reported_used_pct"] == 98.0   # shown as 0 % left
+    assert two_left["windows"]["seven_day"]["used_pct"] == 98.0       # the stored report is untouched
     stale = {"windows": {"five_hour": {"used_pct": 10.0},
                          "seven_day": {"status": "rejected", "resets_at": (NOW - timedelta(hours=1)).isoformat()}}}
     assert effective_windows(stale, NOW)["five_hour"]["used_pct"] == 10.0

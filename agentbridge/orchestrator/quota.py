@@ -106,9 +106,15 @@ def effective_windows(pq: dict | None, now) -> dict[str, dict]:
     """Provider windows as they constrain work: an exhausted weekly window also empties the 5h one.
 
     Providers keep reporting the 5h window as fresh while the weekly pool is empty, yet no call
-    succeeds until the weekly reset, so 5h is shown and treated as 0 % left until then.
+    succeeds until the weekly reset, so 5h is shown and treated as 0 % left until then. A window
+    counted as empty (e.g. 1 % of the week left) is itself shown as 0 % left; the provider's own
+    number stays in `reported_used_pct`.
     """
     wins = {k: dict(v) for k, v in ((pq or {}).get("windows") or {}).items()}
+    for name, w in wins.items():
+        resets = parse_ts(w.get("resets_at"))
+        if _exhausted(w, name) and not (resets and resets <= now) and w.get("used_pct") is not None:
+            w.update(reported_used_pct=w["used_pct"], used_pct=100.0)
     week = wins.get("seven_day")
     if week and _exhausted(week, "seven_day"):
         resets = parse_ts(week.get("resets_at"))
