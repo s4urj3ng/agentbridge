@@ -16,6 +16,8 @@ def test_weekly_zero_caps_five_hour():
     assert w["five_hour"]["used_pct"] == 100.0 and w["five_hour"]["status"] == "rejected"
     assert w["five_hour"]["resets_at"] == LATER
     assert pq["windows"]["five_hour"]["used_pct"] == 0.0           # the stored report is untouched
+    shown_zero = {"windows": {"five_hour": {"used_pct": 11.0}, "seven_day": {"used_pct": 99.6, "resets_at": LATER}}}
+    assert effective_windows(shown_zero, NOW)["five_hour"]["used_pct"] == 100.0
 
 
 def test_weekly_left_or_stale_keeps_five_hour():

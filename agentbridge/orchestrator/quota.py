@@ -87,7 +87,8 @@ def is_quota_block(why: str) -> bool:
 
 
 def _exhausted(w: dict) -> bool:
-    return w.get("status") == "rejected" or (w.get("used_pct") is not None and w["used_pct"] >= 100)
+    """Rejected, or shown as 0 % left (under half a percent remains: not enough for a call)."""
+    return w.get("status") == "rejected" or (w.get("used_pct") is not None and w["used_pct"] >= 99.5)
 
 
 def effective_windows(pq: dict | None, now) -> dict[str, dict]:
