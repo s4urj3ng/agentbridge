@@ -21,8 +21,12 @@ def test_weekly_zero_caps_five_hour():
 
 
 def test_weekly_left_or_stale_keeps_five_hour():
-    pq = {"windows": {"five_hour": {"used_pct": 10.0}, "seven_day": {"used_pct": 99.0, "resets_at": LATER}}}
+    pq = {"windows": {"five_hour": {"used_pct": 10.0}, "seven_day": {"used_pct": 97.0, "resets_at": LATER}}}
     assert effective_windows(pq, NOW)["five_hour"]["used_pct"] == 10.0
+    two_left = {"windows": {"five_hour": {"used_pct": 10.0}, "seven_day": {"used_pct": 98.0, "resets_at": LATER}}}
+    w = effective_windows(two_left, NOW)
+    assert w["five_hour"]["used_pct"] == 100.0 and w["seven_day"]["status"] == "rejected"
+    assert w["seven_day"]["used_pct"] == 98.0                       # the real number stays visible
     stale = {"windows": {"five_hour": {"used_pct": 10.0},
                          "seven_day": {"status": "rejected", "resets_at": (NOW - timedelta(hours=1)).isoformat()}}}
     assert effective_windows(stale, NOW)["five_hour"]["used_pct"] == 10.0

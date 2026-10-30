@@ -86,9 +86,17 @@ def is_quota_block(why: str) -> bool:
         or "window budget" in why
 
 
-def _exhausted(w: dict) -> bool:
-    """Rejected, or shown as 0 % left (under half a percent remains: not enough for a call)."""
-    return w.get("status") == "rejected" or (w.get("used_pct") is not None and w["used_pct"] >= 99.5)
+# Left below which a window counts as empty: the weekly pool at 1-2 % does not finish a task (owner,
+# 2026-10-30); other windows count as empty once they show 0 %.
+EMPTY_LEFT_PCT = {"seven_day": 2.0}
+EMPTY_LEFT_DEFAULT = 0.5
+
+
+def _exhausted(w: dict, name: str = "") -> bool:
+    if w.get("status") == "rejected":
+        return True
+    used = w.get("used_pct")
+    return used is not None and 100 - used <= EMPTY_LEFT_PCT.get(name, EMPTY_LEFT_DEFAULT)
 
 
 def effective_windows(pq: dict | None, now) -> dict[str, dict]:
@@ -99,9 +107,10 @@ def effective_windows(pq: dict | None, now) -> dict[str, dict]:
     """
     wins = {k: dict(v) for k, v in ((pq or {}).get("windows") or {}).items()}
     week = wins.get("seven_day")
-    if week and _exhausted(week):
+    if week and _exhausted(week, "seven_day"):
         resets = parse_ts(week.get("resets_at"))
         if not (resets and resets <= now):
+            week["status"] = "rejected"
             five = wins.setdefault("five_hour", {})
             five.update(used_pct=100.0, status="rejected", resets_at=week.get("resets_at"), capped_by="seven_day")
     return wins
@@ -124,7 +133,7 @@ def provider_block(a: sqlite3.Row, now) -> str | None:
         if resets and resets <= now:
             continue
         until = f" until {w['resets_at']}" if w.get("resets_at") else ""
-        if _exhausted(w):
+        if _exhausted(w, name):
             return f"provider window {name} exhausted{until}"
         limit = stop.get(name) if isinstance(stop, dict) else stop
         if limit is not None and w.get("used_pct") is not None and w["used_pct"] >= float(limit):
