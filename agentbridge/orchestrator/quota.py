@@ -52,8 +52,11 @@ def admission(conn: sqlite3.Connection, agent_id: str, purpose: str) -> tuple[bo
     co = parse_ts(a["circuit_open_until"])
     if co and co > now:
         return False, f"circuit open until {a['circuit_open_until']}"
-    if running_count(conn, agent_id) >= a["max_concurrency"]:
+    running = running_count(conn, agent_id)
+    if running >= a["max_concurrency"]:
         return False, "at max concurrency"
+    if purpose == "review" and "tech_lead" in jload(a["roles_json"], []) and running >= a["max_concurrency"] - 1:
+        return False, "tech lead slot kept free (reviews use the other slots)"
     d, w, _dr = invocation_counts(conn, agent_id)
     if a["daily_invocation_limit"] is not None:
         limit = a["daily_invocation_limit"]
