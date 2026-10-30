@@ -66,6 +66,9 @@ policy:
   self_approve: true
   self_merge: true
   draft_pr: auto
+  # A task sent back 3 times moves to Claude Personal (Opus 5.5) for its next revision.
+  escalate_after_revisions: 3
+  escalation_worker: claude-personal-worker
   # The tracked boot prototype (chdk-port/platform/g3x/sub/110c/*) and the payload/loader sources
   # in firmware/tools (.S, .m, .json) are editable since 2026-10-30. Build outputs, ROM bytes and
   # toolchains are never committed. AGENTS.md is the owner's contract.

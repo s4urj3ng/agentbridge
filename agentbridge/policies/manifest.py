@@ -67,6 +67,10 @@ class PolicySection(_Strict):
     # branch is not yet merged into the base branch (stacked work), instead of from the base.
     stack_on_unmerged: bool = True
     draft_pr: Literal["never", "approval", "auto"] = "approval"
+    # A task that has been sent back this many times moves to `escalation_worker` (a stronger
+    # model) for its next revision, when that worker is enabled and has quota.
+    escalate_after_revisions: int | None = None
+    escalation_worker: str | None = None
     # True: the owner delegates approvals to the Tech Lead. Draft PRs, scope changes and engine
     # stops (Tech Lead cap / repeated failures) are approved at once as `tech_lead:self`; planning
     # no longer stops to wait for owner decisions. Hardware policy, forbidden paths, protected

@@ -149,6 +149,25 @@ class Engine:
                 return a
         return None
 
+    def _maybe_escalate(self, t, revisions: int, m: Manifest, project) -> None:
+        """Hand a task that keeps coming back to the project's stronger escalation worker."""
+        pol = m.policy
+        to = pol.escalation_worker
+        if not to or pol.escalate_after_revisions is None or revisions < pol.escalate_after_revisions \
+                or t["assignee"] == to:
+            return
+        a = row(self.conn, "SELECT roles_json FROM agents WHERE id=? AND enabled=1", to)
+        if a is None or "worker" not in jload(a["roles_json"], []) or self._config_problem(to):
+            return
+        ok, why = quota.admission(self.conn, to, "work")
+        if not ok and not why.startswith("at max concurrency"):
+            audit(self.conn, "engine", "task.escalate_skipped", project_id=project["id"], task_id=t["id"],
+                  to=to, reason=why[:200])
+            return
+        self.conn.execute("UPDATE tasks SET assignee=?, updated_at=? WHERE id=?", (to, now_iso(), t["id"]))
+        audit(self.conn, "engine", "task.escalate", project_id=project["id"], task_id=t["id"],
+              frm=t["assignee"], to=to, revisions=revisions)
+
     def _config_problem(self, agent_id: str) -> str | None:
         """Static adapter-config refusal (e.g. a model outside the allowed quota pool)."""
         ad = self.adapter(agent_id)
@@ -1000,6 +1019,7 @@ class Engine:
                            blocked_reason=None, reviewer=None)
             else:
                 raise InvalidTransition(f"cannot request revision in state {t['state']}")
+            self._maybe_escalate(t, t["revision_count"] + 1, m, project)
             return
         if d.type == "REQUEST_REVIEW":
             t = self._task_in_milestone(d.task_id, milestone)
@@ -1213,7 +1233,8 @@ class Engine:
                 continue
             m = self.manifest(t["project_id"])
             workers = self._agent_roster(m)["workers"]
-            if t["assignee"] not in (m.project.default_worker, *m.project.workers):
+            escalated = t["assignee"] == m.policy.escalation_worker and m.policy.escalate_after_revisions is not None
+            if t["assignee"] not in (m.project.default_worker, *m.project.workers) and not escalated:
                 # the owner removed this worker from the project: follow the new order instead
                 agent, why, action = self._pick_in_order(workers, "work"), "not in project workers", "task.reroute"
             else:
