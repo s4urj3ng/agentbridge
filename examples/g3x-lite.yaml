@@ -66,9 +66,10 @@ policy:
   self_approve: true
   self_merge: true
   draft_pr: auto
-  # The tracked boot prototype (chdk-port/platform/g3x/sub/110c/*) is editable since 2026-10-30.
-  # Build outputs, ROM bytes and toolchains are never committed. AGENTS.md is the owner's contract.
-  forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.BIN", "**/*.FI2", "**/*.fi2", "**/*.fir",
+  # The tracked boot prototype (chdk-port/platform/g3x/sub/110c/*) and the payload/loader sources
+  # in firmware/tools (.S, .m, .json) are editable since 2026-10-30. Build outputs, ROM bytes and
+  # toolchains are never committed. AGENTS.md is the owner's contract.
+  forbidden_paths: [".github/workflows/**", "firmware/dumps/**", "**/*.bin", "**/*.BIN", "**/*.FI2", "**/*.fi2", "**/*.fir",
                     "**/*.rom", "**/*.elf", "**/*.o", "**/*.a", "**/DISKBOOT.BIN", "patches/**", "vendor/**",
                     "toolchains/**", "candidate_port2a/**", "AGENTS.md", "**/*.pem", "**/.env"]
   protected_branches: [main, master, "release/*"]
