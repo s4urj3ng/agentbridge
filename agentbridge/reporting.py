@@ -15,7 +15,7 @@ from typing import Any
 
 from .db import jload, parse_ts, row, rows, utcnow
 from .orchestrator.overrides import fallback_chain
-from .orchestrator.quota import provider_block, running_count, window_count
+from .orchestrator.quota import effective_windows, provider_block, running_count, window_count
 
 
 def engine_running(data_dir: Path) -> bool:
@@ -83,7 +83,7 @@ def quota_report(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                    (now - timedelta(days=7)).isoformat(timespec="seconds"))
         provider = []
         pq = jload(a["provider_quota_json"], None)
-        for name, w in ((pq or {}).get("windows") or {}).items():
+        for name, w in effective_windows(pq, now).items():
             resets = parse_ts(w.get("resets_at"))
             stale = bool(resets and resets <= now)   # window has reset since the last report
             used = w.get("used_pct")

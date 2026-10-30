@@ -86,6 +86,26 @@ def is_quota_block(why: str) -> bool:
         or "window budget" in why
 
 
+def _exhausted(w: dict) -> bool:
+    return w.get("status") == "rejected" or (w.get("used_pct") is not None and w["used_pct"] >= 100)
+
+
+def effective_windows(pq: dict | None, now) -> dict[str, dict]:
+    """Provider windows as they constrain work: an exhausted weekly window also empties the 5h one.
+
+    Providers keep reporting the 5h window as fresh while the weekly pool is empty, yet no call
+    succeeds until the weekly reset, so 5h is shown and treated as 0 % left until then.
+    """
+    wins = {k: dict(v) for k, v in ((pq or {}).get("windows") or {}).items()}
+    week = wins.get("seven_day")
+    if week and _exhausted(week):
+        resets = parse_ts(week.get("resets_at"))
+        if not (resets and resets <= now):
+            five = wins.setdefault("five_hour", {})
+            five.update(used_pct=100.0, status="rejected", resets_at=week.get("resets_at"), capped_by="seven_day")
+    return wins
+
+
 def provider_block(a: sqlite3.Row, now) -> str | None:
     """Refuse when the provider's own report says a window is exhausted or above the owner's stop level.
 
@@ -98,12 +118,12 @@ def provider_block(a: sqlite3.Row, now) -> str | None:
     if not pq:
         return None
     stop = jload(a["config_json"], {}).get("provider_stop_pct")
-    for name, w in (pq.get("windows") or {}).items():
+    for name, w in effective_windows(pq, now).items():
         resets = parse_ts(w.get("resets_at"))
         if resets and resets <= now:
             continue
         until = f" until {w['resets_at']}" if w.get("resets_at") else ""
-        if w.get("status") == "rejected":
+        if _exhausted(w):
             return f"provider window {name} exhausted{until}"
         limit = stop.get(name) if isinstance(stop, dict) else stop
         if limit is not None and w.get("used_pct") is not None and w["used_pct"] >= float(limit):
