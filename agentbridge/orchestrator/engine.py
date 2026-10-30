@@ -29,7 +29,7 @@ from ..adapters.base import AgentAdapter, AgentResult, ExecRequest
 from ..adapters.registry import make_adapter
 from ..config import Settings
 from ..db import audit, connect, jdump, jload, migrate, now_iso, parse_ts, row, rows, tx
-from ..integrations.github import GitHubClient, GitHubError, repo_slug_from_url
+from ..integrations.github import GitHubClient, GitHubError, is_transient, repo_slug_from_url
 from ..policies.manifest import Manifest
 from ..policies.safety import (PolicyViolation, hardware_no_go_hits, is_protected_branch, redact)
 from ..workers import process
@@ -287,6 +287,7 @@ class Engine:
     # engine stops the Tech Lead may lift itself per milestone; past this a stuck milestone waits for
     # the owner instead of looping on the Tech Lead's quota (it has no fallback)
     SELF_RESUME_MAX = 3
+    GITHUB_RETRIES = 5        # attempts for a draft-PR / merge event hitting a transient GitHub error
 
     def _auto_approver(self, project_id: int, action: str, milestone_id: int | None) -> str | None:
         if action == "merge_protected":
@@ -1143,6 +1144,12 @@ class Engine:
                 evq.finish(self.conn, ev["id"], "DONE")
         except Exception as e:
             with tx(self.conn):
+                if action in ("create_draft_pr", "merge_milestone") and is_transient(e) \
+                        and ev["attempts"] < self.GITHUB_RETRIES:
+                    evq.defer(self.conn, ev["id"], 120 * ev["attempts"], redact(str(e))[:2000], refund_attempt=False)
+                    audit(self.conn, "engine", "system_event.retry", project_id=ev["project_id"], action=action,
+                          attempt=ev["attempts"], error=redact(str(e))[:500])
+                    return
                 evq.finish(self.conn, ev["id"], "FAILED", redact(str(e))[:2000])
                 audit(self.conn, "engine", "system_event.failed", project_id=ev["project_id"], error=redact(str(e))[:500])
 

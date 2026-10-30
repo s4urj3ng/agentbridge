@@ -23,6 +23,15 @@ class GitHubError(Exception):
     pass
 
 
+_TRANSIENT = re.compile(r"something went wrong|HTTP 5\d\d|\b50[234]\b|timed? ?out|connection (reset|refused)|"
+                        r"\bEOF\b|secondary rate limit|try again", re.I)
+
+
+def is_transient(err: Exception) -> bool:
+    """GitHub-side hiccups (GraphQL 'Something went wrong', 5xx, timeouts) worth retrying later."""
+    return isinstance(err, GitHubError) and bool(_TRANSIENT.search(str(err)))
+
+
 def repo_slug_from_url(url: str | None) -> str | None:
     if not url:
         return None

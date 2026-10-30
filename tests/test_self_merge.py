@@ -93,3 +93,28 @@ def test_merge_waits_for_owner_without_self_merge(settings, tmp_path):
     run(e, 30)
     assert q(e, "SELECT status FROM approval_requests WHERE action='merge_milestone'") == [{"status": "PENDING"}]
     assert not calls
+
+
+def test_transient_github_error_is_retried(settings, tmp_path):
+    from agentbridge.integrations.github import GitHubError, is_transient
+    e, repo, remote, calls = _setup(settings, tmp_path, self_approve=True, self_merge=True)
+    m1 = e.submit_goal("demo-calc", GOAL, "M1")
+    run(e, 120)
+    real, fails = e.github.create_draft_pr, []
+
+    def flaky(**kw):
+        if len(fails) < 2:
+            fails.append(1)
+            raise GitHubError("pull request create failed: GraphQL: Something went wrong while executing your query")
+        return real(**kw)
+
+    e.github.create_draft_pr = flaky
+    _plan(e, m1, "M1")
+    for _ in range(3):
+        run(e, 30)
+        e.conn.execute("UPDATE events SET not_before=NULL WHERE status='DEFERRED'")   # skip the backoff
+    assert len(fails) == 2 and [c[0] for c in calls] == ["create", "merge"]
+    assert q(e, "SELECT COUNT(*) c FROM audit_log WHERE action='system_event.retry'")[0]["c"] == 2
+    assert not q(e, "SELECT 1 FROM audit_log WHERE action='system_event.failed'")
+    # a permanent error still fails at once
+    assert not is_transient(GitHubError("no commits between"))
