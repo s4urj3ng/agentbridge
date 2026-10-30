@@ -31,6 +31,9 @@ class ProjectSection(_Strict):
     reviewers: list[str] = Field(default_factory=list)
     review_policy: Literal["never", "risk", "always"] = "risk"
     review_risk_paths: list[str] = Field(default_factory=list)
+    # Host directory of local-only files (never committed) added to every worktree, e.g. a ROM dump,
+    # an untracked SDK tree or local build scripts. See GitWorkspace.apply_overlay.
+    local_overlay: str | None = None
 
 
 class ValidationSection(_Strict):

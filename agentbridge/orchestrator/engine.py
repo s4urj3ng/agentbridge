@@ -222,7 +222,8 @@ class Engine:
 
     def workspace(self, project: sqlite3.Row, m: Manifest | None = None) -> GitWorkspace:
         m = m or self.manifest(project["id"])
-        return GitWorkspace(project["repo_path"], self.s.workspaces_dir, self._protected(m), project["remote_name"])
+        return GitWorkspace(project["repo_path"], self.s.workspaces_dir, self._protected(m), project["remote_name"],
+                            overlay=m.project.local_overlay)
 
     # ================================================================ owner operations (API-safe: DB only)
     def submit_goal(self, project_slug: str, goal: str, milestone_key: str | None = None, actor: str = "owner") -> int:

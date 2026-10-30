@@ -1,7 +1,10 @@
 # G3X Lite — Canon PowerShot G3 X GM1.10C CHDK port.
 # Owner decision 2026-10-28: unattended runs. auto_start + autonomous: goals start at once and the
 # Tech Lead keeps going (retry / revise / reassign, Codex reviews every task) without asking.
-# Since 2026-10-30 the Tech Lead also approves (policy.self_approve). Hardware policy: STRICT NO-GO.
+# Since 2026-10-30 the Tech Lead also approves and merges (policy.self_approve / self_merge).
+# First-boot path (owner decision 2026-10-30): agents may read the ROM dump, edit the tracked boot
+# prototype and build first-boot candidates. Flashing, SD-card writes, anything on the camera and
+# hardware trials stay forbidden: the owner runs every trial by hand.
 project:
   slug: g3x-lite
   name: G3X Lite (CHDK port, PowerShot G3 X GM1.10C)
@@ -14,6 +17,11 @@ project:
   reviewers: [antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
   review_policy: always                       # every task gets an independent review before approval
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
+  # Local-only files mirrored from the owner's Mac checkout (read-only, never committed): ROM dump
+  # firmware/dumps/GM1.10C/PRIMARY.BIN, the full CHDK tree under chdk-port/, local build/validate
+  # scripts in tools/, local research docs, candidate_port2a/ (pre-correction), and
+  # toolchains/gcc-arm-none-eabi-5_4-2016q3 (Linux build of the pinned compiler).
+  local_overlay: /var/lib/agentbridge/g3x-local/overlay
 
 validation:
   # Offline suites only. Reviewed 2026-10-27 against origin/main 16b954a and run on a clean clone
@@ -33,12 +41,19 @@ validation:
     audit_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_early*.py"]
     hdmi_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_validate_hdmi*.py"]
     port9_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_port9*.py", "-v"]
+    # first-boot path: builds and checks candidates (nothing leaves the host)
+    witness_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_validate_witness*.py"]
+    restart_sd_tests: ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_restart_sd*.py"]
+    candidate_build: ["python3", "-B", "tools/build_candidate_port2a.py"]
+    candidate_validate: ["python3", "-B", "tools/validate_candidate_port2a.py"]
   default: [bootstrap, port_tests, audit_tests, hdmi_tests]
   timeout_s: 900
 
 policy:
-  hardware_policy: STRICT_NO_GO      # denies flashing, camera ops, SD writes, boot manipulation, deployment, hardware trials
-  hardware_no_go: [firmware_flashing, camera_operations, sd_card_writing, boot_manipulation, firmware_deployment, hardware_trial]
+  # boot_manipulation is allowed (boot prototype edits, DISKBOOT candidate builds on the host);
+  # everything that touches the camera or an SD card is not.
+  hardware_policy: none
+  hardware_no_go: [firmware_flashing, camera_operations, sd_card_writing, firmware_deployment, hardware_trial]
   auto_start: true
   autonomous: true
   # When a milestone completes, the Tech Lead plans and starts the next one (or stops with
@@ -51,11 +66,11 @@ policy:
   self_approve: true
   self_merge: true
   draft_pr: auto
-  # chdk-port/** is firmware-side source (boot_prototype.c, stubs): read-only for offline milestones.
-  # AGENTS.md is the owner's agent contract: agents never edit it. Relax only by owner decision.
-  forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.FI2", "**/*.fi2", "**/*.fir",
-                    "**/*.rom", "**/*.elf", "**/*.o", "**/DISKBOOT.BIN", "patches/**", "vendor/**",
-                    "chdk-port/**", "AGENTS.md", "**/*.pem", "**/.env"]
+  # The tracked boot prototype (chdk-port/platform/g3x/sub/110c/*) is editable since 2026-10-30.
+  # Build outputs, ROM bytes and toolchains are never committed. AGENTS.md is the owner's contract.
+  forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.BIN", "**/*.FI2", "**/*.fi2", "**/*.fir",
+                    "**/*.rom", "**/*.elf", "**/*.o", "**/*.a", "**/DISKBOOT.BIN", "patches/**", "vendor/**",
+                    "toolchains/**", "candidate_port2a/**", "AGENTS.md", "**/*.pem", "**/.env"]
   protected_branches: [main, master, "release/*"]
   max_changed_files: 40
 
@@ -65,19 +80,28 @@ limits:
   max_revisions: 8                 # autonomous mode: room for review/revise cycles
 
 charter: |
-  Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Work is strictly offline:
-  source, build tooling, static analysis within the approved scope, and host-side tests.
-  Restricted firmware analysis outside the approved scope is not allowed.
+  Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Current objective (owner,
+  2026-10-30): reach the first boot, i.e. a corrected first-boot witness candidate (DISKBOOT.BIN
+  plus witness inspector) that the owner can try on the camera by hand, with a written trial and
+  recovery plan for the owner.
+  Allowed on the host: reading the GM1.10C ROM dump (firmware/dumps/GM1.10C/PRIMARY.BIN, present in
+  every worktree), editing the tracked boot prototype (chdk-port/platform/g3x/sub/110c/), building
+  candidates with the pinned toolchain (toolchains/gcc-arm-none-eabi-5_4-2016q3) and the local
+  build scripts, and host-side tests. The Tech Lead decides which ROM ranges a task reads; record
+  every range read (start, length, SHA-256) in an evidence manifest checked with
+  tools/port11c_evidence_validator.py. Never commit ROM bytes, build outputs or binaries. No
+  full-ROM scans.
+  Never: flashing, SD-card writes, connecting to or running anything on the camera, hardware
+  trials. The owner runs every trial and reports the result.
   Repository rules: AGENTS.md and docs/SAFETY.md apply. Label every claim VERIFIED / INFERRED /
   UNKNOWN with exact citations. Never infer firmware addresses, offsets or CPU mode without
-  evidence. ROM reads need explicit owner approval of an exact byte range and are impossible on
-  the AgentBridge host (no firmware/ files there). Local-only sources (untracked/Git-ignored L1/L2
-  in PORT-9A) are not available on the AgentBridge clone; do not cite them as checkable.
+  evidence.
 context:
-  - "Hardware policy is STRICT NO-GO: no flashing, camera operations, SD-card writing, boot changes, deployment or hardware trials."
-  - "Never run tests/test_validate_witness_inspector.py or tools/build_witness_inspector.py: they build a camera payload binary."
+  - "First-boot path open (owner, 2026-10-30): ROM reads, boot prototype edits and host-side candidate builds are allowed. Flashing, SD-card writes, camera operations and hardware trials are not: the owner does those by hand."
+  - "Building payloads/candidates is allowed on the host (tools/build_witness_inspector.py, tools/build_candidate_port2a.py, witness_tests / candidate_build / candidate_validate validation names). Outputs stay untracked."
+  - "Local-only files are mirrored into every worktree from the owner's Mac (read-only hard links, git-excluded): full CHDK tree in chdk-port/, local tools/*.py, local docs (L1/L2 research), candidate_port2a/ (PRE-CORRECTION). To change a local-only tool, write a new tracked file instead of editing the link."
   - "chdk-port/platform/g3x is Git-ignored; AgentBridge recreates it in every worktree with tools/bootstrap_chdk_platform.py before tests. Never edit those generated files."
   - "PORT-9A delivered tools/port9a_runtime_lifecycle.py (stdlib state model), 32 tests and docs/PORT9A_RUNTIME_INTEGRATION_MAP.md: interfaces I1-I4 modelled, all GM1.10C preconditions False, unknowns U1-U7."
   - "docs/PROJECT_STATE.md and docs/HANDOFF.md were last updated for PORT-5E; PORT-7B..9A are recorded in git history and their own docs."
-  - "Candidate next milestone: PORT-9B — offline runtime integration contracts. The owner delegated the go/no-go to the Tech Lead (2026-10-30); check first whether PR #11 (tools/port9b_runtime_contract.py) already covers it."
+  - "Earlier recommended step PORT-10A (bounded ROM verification of U1-U3) is now possible on the host; candidate_port2a/ predates the SD1stInit and PORT-5E fixes and must be rebuilt before any trial."
 completed_milestones: [PORT-7B, PORT-7C, PORT-8A, PORT-9A]

@@ -11,7 +11,9 @@ Rules enforced here:
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,11 +67,13 @@ class ChangeSet:
 
 
 class GitWorkspace:
-    def __init__(self, repo_path: str | Path, worktrees_root: Path, protected: list[str], remote: str = "origin"):
+    def __init__(self, repo_path: str | Path, worktrees_root: Path, protected: list[str], remote: str = "origin",
+                 overlay: str | Path | None = None):
         self.repo = Path(repo_path).resolve()
         self.root = worktrees_root.resolve()
         self.protected = protected
         self.remote = remote
+        self.overlay = Path(overlay).resolve() if overlay else None
         if not (self.repo / ".git").exists():
             raise GitError(f"{self.repo} is not a git repository")
 
@@ -114,6 +118,7 @@ class GitWorkspace:
         if path.exists():
             # Re-use only if it is a registered worktree on the same branch (resume case)
             if self._registered_branch(path) == f"refs/heads/{branch}":
+                self.apply_overlay(path)
                 return path
             raise GitError(f"worktree path already exists and is not ours: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,6 +127,7 @@ class GitWorkspace:
         else:
             git(self.repo, "worktree", "add", "-b", branch, str(path), start_sha)
         self.verify_isolation(path, branch)
+        self.apply_overlay(path)
         return path
 
     def create_detached_worktree(self, path: Path, sha: str) -> Path:
@@ -133,7 +139,66 @@ class GitWorkspace:
             raise GitError(f"worktree path already exists: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
         git(self.repo, "worktree", "add", "--detach", str(path), sha)
+        self.apply_overlay(path)
         return path
+
+    # ---------------------------------------------------------- local overlay
+    _EXCLUDE_BEGIN, _EXCLUDE_END = "# >>> agentbridge local overlay", "# <<< agentbridge local overlay"
+
+    def apply_overlay(self, path: Path) -> int:
+        """Add the project's local-only files (never in git) to a worktree.
+
+        Read-only files are hard-linked (shared, so keep them read-only); writable files, such as
+        prebuilt objects a build may overwrite, are copied per worktree. Symlinks are recreated, and
+        anything the checkout already has wins, so tracked files are never replaced. Every overlay path is listed in
+        the repository's info/exclude, so these files never show up as changes or get committed.
+        """
+        if not self.overlay or not self.overlay.is_dir():
+            return 0
+        added, rels = 0, []
+        for top, dirs, files in os.walk(self.overlay):
+            for name in list(dirs):
+                if (Path(top) / name).is_symlink():
+                    dirs.remove(name)
+                    files.append(name)
+            for name in files:
+                src = Path(top) / name
+                rel = src.relative_to(self.overlay)
+                rels.append(rel.as_posix())
+                dst = path / rel
+                if dst.exists() or dst.is_symlink():
+                    continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if src.is_symlink():
+                    dst.symlink_to(os.readlink(src))
+                elif src.stat().st_mode & 0o222:
+                    shutil.copy2(src, dst)
+                else:
+                    try:
+                        os.link(src, dst)
+                    except OSError:
+                        shutil.copy2(src, dst)
+                added += 1
+        self._write_overlay_excludes(rels)
+        return added
+
+    def _write_overlay_excludes(self, rels: list[str]) -> None:
+        common = Path(git(self.repo, "rev-parse", "--git-common-dir"))
+        exclude = (common if common.is_absolute() else self.repo / common) / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        old = exclude.read_text() if exclude.exists() else ""
+        keep, inside = [], False
+        for line in old.splitlines():
+            if line == self._EXCLUDE_BEGIN:
+                inside = True
+            elif line == self._EXCLUDE_END:
+                inside = False
+            elif not inside:
+                keep.append(line)
+        block = [self._EXCLUDE_BEGIN, *("/" + re.sub(r"([\\[*?])", r"\\\1", r) for r in sorted(set(rels))), self._EXCLUDE_END]
+        new = "\n".join(keep + block) + "\n"
+        if new != old:
+            exclude.write_text(new)
 
     def _registered_branch(self, path: Path) -> str | None:
         cur = None

@@ -198,3 +198,21 @@ milestone it judges sound, oldest first. For each one, AgentBridge:
 A merge commit keeps stacked PRs clean. Without `self_merge`, a `MERGE_MILESTONE` becomes an owner
 approval. Branch protection rules on GitHub still apply, and a refused merge is audited
 (`system_event.failed`).
+
+## Local-only files (project.local_overlay)
+
+Some projects need files that must never be committed, such as a ROM dump, an untracked SDK tree,
+local build scripts or a pinned toolchain. Put them in a host directory and set
+`project.local_overlay` to it. Every task, integration and review worktree then receives them:
+
+- Read-only files are hard-linked, so keep them read-only (`chmod a-w`): a worktree cannot change
+  the shared copy.
+- Writable files (for example prebuilt objects a build overwrites) are copied per worktree.
+- Symlinks (for example `toolchains -> /opt/...`) are recreated.
+- A file the checkout already tracks always wins.
+- All overlay paths are written to the repository's `info/exclude`. They never appear as changes
+  and never get committed.
+
+g3x-lite uses `/var/lib/agentbridge/g3x-local/overlay`. It holds the GM1.10C ROM dump, the full
+CHDK tree, the local tools and docs from the owner's Mac, and a symlink to the Linux build of
+`gcc-arm-none-eabi-5_4-2016q3`, which needs `libc6:i386`.
