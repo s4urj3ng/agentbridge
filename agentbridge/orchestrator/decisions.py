@@ -101,10 +101,18 @@ class NoFurtherWork(_D):
     reason: str = Field(min_length=3, max_length=3000)
 
 
+class MergeMilestone(_D):
+    """Only valid for PLAN_NEXT_MILESTONE events: merge a completed milestone's PR into the base branch."""
+    type: Literal["MERGE_MILESTONE"]
+    milestone_key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_\-\.]{1,40}$")
+    reason: str = Field(min_length=3, max_length=3000)
+
+
 Decision = Annotated[Union[CreateTasks, AssignTask, RequestRevision, RequestReview, ApproveTask,
-                           BlockTask, CompleteMilestone, RequestHumanApproval, ProposeMilestone, NoFurtherWork],
+                           BlockTask, CompleteMilestone, RequestHumanApproval, ProposeMilestone, NoFurtherWork,
+                           MergeMilestone],
                      Field(discriminator="type")]
-PLANNING_DECISIONS = {"PROPOSE_MILESTONE", "NO_FURTHER_WORK"}
+PLANNING_DECISIONS = {"PROPOSE_MILESTONE", "NO_FURTHER_WORK", "MERGE_MILESTONE"}
 
 
 class DecisionEnvelope(_D):

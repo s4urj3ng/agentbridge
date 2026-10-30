@@ -109,7 +109,8 @@ Hard policy (hardware no-go, protected branches, forbidden paths) still applies 
 PLAN_NEXT_RULES = """## Plan the next milestone
 The milestone above is COMPLETE. Decide what the project does next, using its summary, the
 project context and the open questions or next steps recorded in the files below.
-Respond with exactly ONE decision:
+Respond with exactly ONE of the two decisions below (optionally preceded by MERGE_MILESTONE
+decisions, when merging is listed as yours):
 - PROPOSE_MILESTONE {key, goal}: a new, bounded milestone (a handful of tasks, finishable in a few
   hours) that builds on the completed work. `key` must be new (for example the next PORT-number).
   `goal` must be self-contained: objective, deliverables (files), acceptance criteria and what is
@@ -131,6 +132,13 @@ evidence the charter excludes."""
 PLAN_SELF_APPROVE = """Do not stop to ask the owner about merge order, candidate milestones or doc
 conflicts: decide. NO_FURTHER_WORK only when every useful next step needs something listed as
 out of your reach."""
+
+PLAN_SELF_MERGE = """Merging is yours: MERGE_MILESTONE {milestone_key, reason} merges a completed
+milestone's PR into the base branch. AgentBridge revalidates the integration branch first and merges
+with a merge commit. Merge oldest first: list every unmerged completed milestone you judge sound, in
+order, before PROPOSE_MILESTONE. Merge only work whose reviews passed and whose claims are labelled
+honestly; leave a milestone unmerged (and say why) if it needs rework. Unmerged completed
+milestones: """
 
 
 def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, milestone: sqlite3.Row,
@@ -215,6 +223,8 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
                         + ", ".join(r["key"] for r in done))
         if manifest.get("self_approve"):
             sections.append(PLAN_SELF_APPROVE)
+        if manifest.get("self_merge"):
+            sections.append(PLAN_SELF_MERGE + (", ".join(manifest.get("unmerged") or []) or "(none)"))
     if extra:
         sections.append(extra)
     free_text = {k: v for k, v in payload.items() if k in UNTRUSTED_PAYLOAD_KEYS and v}

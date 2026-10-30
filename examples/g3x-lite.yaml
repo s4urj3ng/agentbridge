@@ -47,8 +47,9 @@ policy:
   auto_next_max_per_day: 6
   stack_on_unmerged: true
   # Owner decision 2026-10-30: the Tech Lead approves for the owner (draft PRs, scope changes,
-  # next milestone). Merging into main stays with the owner.
+  # next milestone) and merges milestone PRs into main when it judges them sound (self_merge).
   self_approve: true
+  self_merge: true
   draft_pr: auto
   # chdk-port/** is firmware-side source (boot_prototype.c, stubs): read-only for offline milestones.
   # AGENTS.md is the owner's agent contract: agents never edit it. Relax only by owner decision.

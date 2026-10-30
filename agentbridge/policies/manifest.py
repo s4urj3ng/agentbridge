@@ -69,6 +69,10 @@ class PolicySection(_Strict):
     # no longer stops to wait for owner decisions. Hardware policy, forbidden paths, protected
     # branches and ROM byte ranges are never covered.
     self_approve: bool = False
+    # True: MERGE_MILESTONE from the Tech Lead is carried out without the owner: the milestone's PR
+    # is revalidated, marked ready and merged (merge commit, oldest milestone first). False: it
+    # becomes an owner approval.
+    self_merge: bool = False
     protected_branches: list[str] = Field(default_factory=list)
     max_changed_files: int = 50
 

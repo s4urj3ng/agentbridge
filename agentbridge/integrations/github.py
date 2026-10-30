@@ -67,6 +67,16 @@ class GitHubClient:
         m = re.search(r"/pull/(\d+)", url)
         return url, int(m.group(1)) if m else None
 
+    def merge_pr(self, *, repo: str, number: int, head_sha: str, workdir: Path) -> None:
+        """Mark a draft PR ready and merge it with a merge commit, only if its head is still `head_sha`."""
+        if not self.enabled:
+            raise GitHubError("GitHub integration disabled")
+        for args in (["pr", "ready", str(number), "--repo", repo],
+                     ["pr", "merge", str(number), "--repo", repo, "--merge", "--match-head-commit", head_sha]):
+            r = run_cmd([self.gh, *args], cwd=workdir, timeout_s=120, env=self._env())
+            if r.exit_code != 0 and not (args[1] == "ready" and "already" in r.stderr.lower()):
+                raise GitHubError(redact(r.stderr.strip())[:1000])
+
 
 def verify_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
     if not secret or not signature_header or not signature_header.startswith("sha256="):

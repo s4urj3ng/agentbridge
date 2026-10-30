@@ -274,6 +274,8 @@ class Engine:
         pol = self.manifest(project_id).policy
         if action == "create_draft_pr" and pol.draft_pr == "auto":
             return "policy:auto"
+        if action == "merge_milestone":
+            return "tech_lead:self" if pol.self_merge else None
         if not pol.self_approve:
             return None
         if action == "other" and milestone_id is not None:
@@ -738,7 +740,7 @@ class Engine:
             with tx(self.conn):
                 evq.finish(self.conn, ev["id"], "DONE", "milestone not active")
             return
-        extra = None
+        extra, unmerged = None, []
         if planning:
             busy_ms = row(self.conn, "SELECT key FROM milestones WHERE project_id=? AND status IN "
                                      "('ACTIVE','AWAITING_APPROVAL','BLOCKED')", project["id"])
@@ -748,6 +750,8 @@ class Engine:
                                f"milestone {busy_ms['key']} already open" if busy_ms else "auto_next disabled")
                 return
             extra = await asyncio.to_thread(self._next_milestone_material, project, milestone, m)
+            if m.policy.self_merge:
+                unmerged = await asyncio.to_thread(self._unmerged_milestones, project, m)
         if ev["type"] == "GOAL_SUBMITTED":
             await asyncio.to_thread(self._ensure_integration_branch_sync, project, milestone, m)
             milestone = row(self.conn, "SELECT * FROM milestones WHERE id=?", ev["milestone_id"])
@@ -769,7 +773,8 @@ class Engine:
             self.conn, project=project, milestone=milestone, event=ev,
             manifest={"charter": m.charter, "denied_categories": m.policy.denied_categories(),
                       "validation_names": list(m.validation.commands), "autonomous": m.policy.autonomous,
-                      "self_approve": m.policy.self_approve},
+                      "self_approve": m.policy.self_approve, "self_merge": m.policy.self_merge,
+                      "unmerged": unmerged},
             agents=self._agent_roster(m), limits={k: lim[k] for k in ("max_task_depth", "max_tasks_per_milestone",
                                                                         "max_revisions")},
             previous_rejection=ev["error"] if ev["attempts"] > 1 else None, extra=extra)
@@ -879,7 +884,7 @@ class Engine:
         planning = bool(ev) and ev["type"] == "PLAN_NEXT_MILESTONE"
         if planning and d.type not in PLANNING_DECISIONS and not (
                 d.type == "REQUEST_HUMAN_APPROVAL" and d.action == "scope_change"):
-            raise PolicyViolation("this event only accepts PROPOSE_MILESTONE or NO_FURTHER_WORK")
+            raise PolicyViolation("this event only accepts MERGE_MILESTONE, PROPOSE_MILESTONE or NO_FURTHER_WORK")
         if d.type in PLANNING_DECISIONS and not planning:
             raise PolicyViolation(f"{d.type} is only valid when planning the next milestone")
         if d.type == "PROPOSE_MILESTONE":
@@ -894,6 +899,18 @@ class Engine:
             new_id = self.submit_goal(project["slug"], d.goal, d.key, actor="tech_lead")
             audit(self.conn, "tech_lead", "milestone.auto_create", project_id=project["id"], milestone=d.key,
                   after=milestone["key"], milestone_id=new_id)
+            return
+        if d.type == "MERGE_MILESTONE":
+            target = row(self.conn, "SELECT * FROM milestones WHERE project_id=? AND key=?", project["id"],
+                         d.milestone_key)
+            if target is None or target["status"] != "COMPLETED" or not target["integration_branch"]:
+                raise PolicyViolation(f"{d.milestone_key} is not a completed milestone with an integration branch")
+            self._request_approval(project["id"], "merge_milestone",
+                                   f"Merge {target['key']} ({target['integration_branch']}) into "
+                                   f"{project['base_branch']}: {d.reason}", "tech_lead", milestone_id=target["id"],
+                                   evidence={"branch": target["integration_branch"], "pr": target["pr_url"]},
+                                   dedupe_key=f"merge:{target['id']}")
+            audit(self.conn, "tech_lead", "milestone.merge_request", project_id=project["id"], milestone=target["key"])
             return
         if d.type == "NO_FURTHER_WORK":
             self._add_context(project["id"], "note", f"Auto-planning stopped after {milestone['key']}: {d.reason[:500]}")
@@ -1084,6 +1101,9 @@ class Engine:
             elif action == "create_draft_pr":
                 if approved:
                     await self._create_draft_pr(ev["milestone_id"])
+            elif action == "merge_milestone":
+                if approved:
+                    await self._merge_milestone(ev["milestone_id"])
             else:
                 ms = row(self.conn, "SELECT status FROM milestones WHERE id=?", ev["milestone_id"]) if ev["milestone_id"] else None
                 if ms and ms["status"] == "BLOCKED" and approved:
@@ -1135,6 +1155,38 @@ class Engine:
             self.conn.execute("UPDATE milestones SET pr_url=?, pr_number=? WHERE id=?", (url, num, ms["id"]))
             self._add_context(project["id"], "outstanding_pr", f"{ms['key']}: {url}")
             audit(self.conn, "engine", "github.draft_pr", project_id=project["id"], url=url)
+
+    async def _merge_milestone(self, milestone_id: int) -> None:
+        """Merge a completed milestone's PR into the base branch (merge commit, so stacked PRs stay clean)."""
+        ms = row(self.conn, "SELECT * FROM milestones WHERE id=?", milestone_id)
+        project = row(self.conn, "SELECT * FROM projects WHERE id=?", ms["project_id"])
+        m = self.manifest(project["id"])
+        ws = self.workspace(project, m)
+        await asyncio.to_thread(ws.fetch)
+        base = ws.approved_base(project["base_branch"])
+        if ws.is_integrated(ms["integration_branch"], base):
+            with tx(self.conn):
+                audit(self.conn, "engine", "github.merge_skipped", project_id=project["id"], milestone=ms["key"],
+                      reason="already in base")
+            return
+        for prev in rows(self.conn, "SELECT key, integration_branch FROM milestones WHERE project_id=? AND id<? "
+                                    "AND status='COMPLETED' AND integration_branch IS NOT NULL ORDER BY id",
+                         project["id"], ms["id"]):
+            if ws.branch_exists(prev["integration_branch"]) and not ws.is_integrated(prev["integration_branch"], base):
+                raise RuntimeError(f"merge {prev['key']} before {ms['key']}")
+        await self._create_draft_pr(milestone_id)          # revalidates, pushes, opens the PR if missing
+        ms = row(self.conn, "SELECT * FROM milestones WHERE id=?", milestone_id)
+        if not ms["pr_number"]:
+            raise RuntimeError("milestone has no PR number")
+        head = ws.resolve(ms["integration_branch"])
+        await asyncio.to_thread(self.github.merge_pr, repo=repo_slug_from_url(project["remote_url"]),
+                                number=ms["pr_number"], head_sha=head, workdir=self.s.artifacts_dir)
+        await asyncio.to_thread(ws.fetch)
+        with tx(self.conn):
+            self._add_context(project["id"], "verified_fact",
+                              f"{ms['key']} merged into {project['base_branch']} (PR {ms['pr_url']}, head {head[:10]})")
+            audit(self.conn, "engine", "github.merged", project_id=project["id"], milestone=ms["key"],
+                  url=ms["pr_url"], head=head)
 
     # ================================================================ scheduling
     def _promote_ready(self) -> bool:
@@ -1274,6 +1326,19 @@ class Engine:
         if not prev or not ws.branch_exists(prev["integration_branch"]):
             return None
         return None if ws.is_integrated(prev["integration_branch"], base_sha) else prev["integration_branch"]
+
+    def _unmerged_milestones(self, project, m: Manifest) -> list[str]:
+        """Keys of completed milestones whose integration branch is not in the base branch yet, oldest first."""
+        ws = self.workspace(project, m)
+        try:
+            ws.fetch()
+            base = ws.approved_base(project["base_branch"])
+        except GitError:
+            return []
+        return [r["key"] for r in rows(self.conn, "SELECT key, integration_branch FROM milestones WHERE project_id=? "
+                                                  "AND status='COMPLETED' AND integration_branch IS NOT NULL ORDER BY id",
+                                       project["id"])
+                if ws.branch_exists(r["integration_branch"]) and not ws.is_integrated(r["integration_branch"], base)]
 
     def _next_milestone_material(self, project, milestone, m: Manifest, budget: int = 12_000) -> str:
         """Hand-over files from the completed milestone's integration head, for planning the next one."""

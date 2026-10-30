@@ -183,6 +183,18 @@ With `self_approve: true` the owner delegates approvals to the Tech Lead:
   fallback.
 - Planning no longer stops to ask about merge order, candidate milestones or doc conflicts.
   `NO_FURTHER_WORK` is left for steps the Tech Lead cannot take at all.
-- Never covered: hardware no-go, forbidden paths, protected branches (`merge_protected` is
-  refused), ROM byte ranges. Merging into the base branch stays with the owner. Until then, new
-  milestones stack on the unmerged integration branches.
+- Never covered: hardware no-go, forbidden paths, protected branches for agent pushes, ROM byte
+  ranges.
+
+With `self_merge: true` too, the Tech Lead can also merge, at planning time (after a milestone
+completes). It lists `MERGE_MILESTONE {milestone_key, reason}` for each completed, unmerged
+milestone it judges sound, oldest first. For each one, AgentBridge:
+
+1. refuses it if an older completed milestone is still unmerged;
+2. reruns the project validation on the integration branch;
+3. pushes it and opens the PR if missing;
+4. runs `gh pr ready` and `gh pr merge --merge --match-head-commit <validated head>`.
+
+A merge commit keeps stacked PRs clean. Without `self_merge`, a `MERGE_MILESTONE` becomes an owner
+approval. Branch protection rules on GitHub still apply, and a refused merge is audited
+(`system_event.failed`).
