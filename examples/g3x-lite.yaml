@@ -1,7 +1,7 @@
 # G3X Lite — Canon PowerShot G3 X GM1.10C CHDK port.
 # Owner decision 2026-10-28: unattended runs. auto_start + autonomous: goals start at once and the
 # Tech Lead keeps going (retry / revise / reassign, Codex reviews every task) without asking.
-# Draft PRs and scope changes still need the owner. Hardware policy: STRICT NO-GO.
+# Since 2026-10-30 the Tech Lead also approves (policy.self_approve). Hardware policy: STRICT NO-GO.
 project:
   slug: g3x-lite
   name: G3X Lite (CHDK port, PowerShot G3 X GM1.10C)
@@ -46,7 +46,10 @@ policy:
   auto_next: true
   auto_next_max_per_day: 6
   stack_on_unmerged: true
-  draft_pr: approval
+  # Owner decision 2026-10-30: the Tech Lead approves for the owner (draft PRs, scope changes,
+  # next milestone). Merging into main stays with the owner.
+  self_approve: true
+  draft_pr: auto
   # chdk-port/** is firmware-side source (boot_prototype.c, stubs): read-only for offline milestones.
   # AGENTS.md is the owner's agent contract: agents never edit it. Relax only by owner decision.
   forbidden_paths: [".github/workflows/**", "firmware/**", "**/*.bin", "**/*.FI2", "**/*.fi2", "**/*.fir",
@@ -75,5 +78,5 @@ context:
   - "chdk-port/platform/g3x is Git-ignored; AgentBridge recreates it in every worktree with tools/bootstrap_chdk_platform.py before tests. Never edit those generated files."
   - "PORT-9A delivered tools/port9a_runtime_lifecycle.py (stdlib state model), 32 tests and docs/PORT9A_RUNTIME_INTEGRATION_MAP.md: interfaces I1-I4 modelled, all GM1.10C preconditions False, unknowns U1-U7."
   - "docs/PROJECT_STATE.md and docs/HANDOFF.md were last updated for PORT-5E; PORT-7B..9A are recorded in git history and their own docs."
-  - "Candidate next milestone: PORT-9B — offline runtime integration contracts. Do not start without owner approval."
+  - "Candidate next milestone: PORT-9B — offline runtime integration contracts. The owner delegated the go/no-go to the Tech Lead (2026-10-30); check first whether PR #11 (tools/port9b_runtime_contract.py) already covers it."
 completed_milestones: [PORT-7B, PORT-7C, PORT-8A, PORT-9A]

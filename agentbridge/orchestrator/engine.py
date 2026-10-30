@@ -258,8 +258,41 @@ class Engine:
              dedupe_key, now_iso()))
         if cur.rowcount:
             audit(self.conn, requested_by, "approval.request", project_id=project_id, task_id=task_id, action=action)
+            by = self._auto_approver(project_id, action, milestone_id)
+            if by:
+                self._resolve_now(cur.lastrowid, by, project_id, milestone_id, task_id, action)
             return cur.lastrowid
         return None
+
+    # engine stops the Tech Lead may lift itself per milestone; past this a stuck milestone waits for
+    # the owner instead of looping on the Tech Lead's quota (it has no fallback)
+    SELF_RESUME_MAX = 3
+
+    def _auto_approver(self, project_id: int, action: str, milestone_id: int | None) -> str | None:
+        if action == "merge_protected":
+            return None
+        pol = self.manifest(project_id).policy
+        if action == "create_draft_pr" and pol.draft_pr == "auto":
+            return "policy:auto"
+        if not pol.self_approve:
+            return None
+        if action == "other" and milestone_id is not None:
+            n = row(self.conn, "SELECT COUNT(*) c FROM approval_requests WHERE milestone_id=? AND action='other' "
+                               "AND resolved_by='tech_lead:self'", milestone_id)["c"]
+            if n >= self.SELF_RESUME_MAX:
+                return None
+        return "tech_lead:self"
+
+    def _resolve_now(self, approval_id: int, by: str, project_id: int, milestone_id: int | None,
+                     task_id: int | None, action: str) -> None:
+        note = "approved by policy (owner delegated approvals)"
+        self.conn.execute("UPDATE approval_requests SET status='APPROVED', resolved_by=?, resolution_note=?, "
+                          "resolved_at=? WHERE id=?", (by, note, now_iso(), approval_id))
+        evq.emit(self.conn, "APPROVAL_RESOLVED", project_id=project_id, milestone_id=milestone_id, task_id=task_id,
+                 payload={"approval_id": approval_id, "approved": True, "action": action, "note": note},
+                 dedupe_key=f"approval:{approval_id}")
+        audit(self.conn, by, "approval.resolve", project_id=project_id, task_id=task_id,
+              approval_id=approval_id, approved=True)
 
     def resolve_approval(self, approval_id: int, approve: bool, actor: str, note: str = "") -> None:
         with tx(self.conn):
@@ -735,7 +768,8 @@ class Engine:
         prompt = build_tech_lead_prompt(
             self.conn, project=project, milestone=milestone, event=ev,
             manifest={"charter": m.charter, "denied_categories": m.policy.denied_categories(),
-                      "validation_names": list(m.validation.commands), "autonomous": m.policy.autonomous},
+                      "validation_names": list(m.validation.commands), "autonomous": m.policy.autonomous,
+                      "self_approve": m.policy.self_approve},
             agents=self._agent_roster(m), limits={k: lim[k] for k in ("max_task_depth", "max_tasks_per_milestone",
                                                                         "max_revisions")},
             previous_rejection=ev["error"] if ev["attempts"] > 1 else None, extra=extra)
@@ -1016,13 +1050,6 @@ class Engine:
                                        "engine", milestone_id=milestone["id"],
                                        evidence={"summary": d.summary[:1000], "branch": milestone["integration_branch"]},
                                        dedupe_key=f"pr:{milestone['id']}")
-                if m.policy.draft_pr == "auto":
-                    a = row(self.conn, "SELECT id FROM approval_requests WHERE dedupe_key=?", f"pr:{milestone['id']}")
-                    self.conn.execute("UPDATE approval_requests SET status='APPROVED', resolved_by='policy:auto', "
-                                      "resolved_at=? WHERE id=?", (now_iso(), a["id"]))
-                    evq.emit(self.conn, "APPROVAL_RESOLVED", project_id=project["id"], milestone_id=milestone["id"],
-                             payload={"approval_id": a["id"], "approved": True, "action": "create_draft_pr"},
-                             dedupe_key=f"approval:{a['id']}")
             return
         if d.type == "REQUEST_HUMAN_APPROVAL":
             if m.policy.autonomous and d.action != "scope_change":

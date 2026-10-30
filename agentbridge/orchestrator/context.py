@@ -119,6 +119,20 @@ Respond with exactly ONE decision:
 Do not repeat work that is already complete."""
 
 
+SELF_APPROVE_RULES = """## Approvals delegated to you (owner decision)
+The owner does not review this project's steps. Decisions that would otherwise wait for the owner
+are yours: scope changes (REQUEST_HUMAN_APPROVAL scope_change is approved automatically, so only
+use it to record a real change of goal), draft PRs, which candidate milestone runs next, and work
+stacked on integration branches that are not merged yet (merging into the base branch stays with
+the owner and never blocks you). Resolve inconsistencies in project docs yourself with evidence.
+Still out of your reach: hardware no-go, forbidden paths, protected branches, ROM byte ranges and
+evidence the charter excludes."""
+
+PLAN_SELF_APPROVE = """Do not stop to ask the owner about merge order, candidate milestones or doc
+conflicts: decide. NO_FURTHER_WORK only when every useful next step needs something listed as
+out of your reach."""
+
+
 def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, milestone: sqlite3.Row,
                            event: sqlite3.Row, manifest: dict, agents: dict[str, list[str]], limits: dict,
                            previous_rejection: str | None = None, extra: str | None = None) -> str:
@@ -150,6 +164,8 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
         or "(none yet)"))
     if manifest.get("autonomous"):
         sections.append(AUTONOMOUS_RULES)
+    if manifest.get("self_approve"):
+        sections.append(SELF_APPROVE_RULES)
     sections.append("## Available identities\n" + json.dumps(agents))
     sections.append("## Limits\n" + json.dumps(limits))
     sections.append("## Validation commands (by name)\n" + json.dumps(sorted(manifest.get("validation_names", []))))
@@ -197,6 +213,8 @@ def build_tech_lead_prompt(conn: sqlite3.Connection, *, project: sqlite3.Row, mi
                           "ORDER BY id DESC LIMIT 8", pid)
         sections.append(PLAN_NEXT_RULES + "\nRecently completed milestones (newest first): "
                         + ", ".join(r["key"] for r in done))
+        if manifest.get("self_approve"):
+            sections.append(PLAN_SELF_APPROVE)
     if extra:
         sections.append(extra)
     free_text = {k: v for k, v in payload.items() if k in UNTRUSTED_PAYLOAD_KEYS and v}

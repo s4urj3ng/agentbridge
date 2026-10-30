@@ -170,3 +170,19 @@ All `max` values are starting points; the providers' real quotas are not machine
 **Agents → Usage** (calls per 5 h / 7 d, limit errors) for a few days and set each cap a little
 below where real limit errors begin. The Codex model id `gpt-6.1-sol` was read from `/model` in
 `codex` on the server; `agents smoke codex-reviewer` fails clearly if it is wrong.
+
+## Tech Lead approves for the owner (policy.self_approve)
+
+With `self_approve: true` the owner delegates approvals to the Tech Lead:
+
+- Draft PRs, `scope_change` requests and engine stops (Tech Lead invocation cap, repeated invalid
+  decisions) are approved at once, `resolved_by = tech_lead:self`, and audited like an owner
+  approval.
+- Engine stops are lifted at most 3 times per milestone (`Engine.SELF_RESUME_MAX`). After that the
+  stop waits for the owner, so a stuck milestone does not burn the Tech Lead's quota, which has no
+  fallback.
+- Planning no longer stops to ask about merge order, candidate milestones or doc conflicts.
+  `NO_FURTHER_WORK` is left for steps the Tech Lead cannot take at all.
+- Never covered: hardware no-go, forbidden paths, protected branches (`merge_protected` is
+  refused), ROM byte ranges. Merging into the base branch stays with the owner. Until then, new
+  milestones stack on the unmerged integration branches.

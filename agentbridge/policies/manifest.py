@@ -64,6 +64,11 @@ class PolicySection(_Strict):
     # branch is not yet merged into the base branch (stacked work), instead of from the base.
     stack_on_unmerged: bool = True
     draft_pr: Literal["never", "approval", "auto"] = "approval"
+    # True: the owner delegates approvals to the Tech Lead. Draft PRs, scope changes and engine
+    # stops (Tech Lead cap / repeated failures) are approved at once as `tech_lead:self`; planning
+    # no longer stops to wait for owner decisions. Hardware policy, forbidden paths, protected
+    # branches and ROM byte ranges are never covered.
+    self_approve: bool = False
     protected_branches: list[str] = Field(default_factory=list)
     max_changed_files: int = 50
 
