@@ -11,12 +11,13 @@ project:
   repo_path: /srv/agentbridge/repos/g3x-lite      # git clone https://github.com/s4urj3ng/g3x-lite
   remote_url: https://github.com/s4urj3ng/g3x-lite
   base_branch: main
-  # 2026-11-01: Claude Team is out of quota, so Claude Personal leads for now. It has one slot,
-  # so it is taken off the code list and escalation until claude-team-lead is back.
-  tech_lead: claude-personal-worker
+  # 2026-11-01 (temporary): Claude Team only leads, never reviews, so its quota goes to lead
+  # decisions. Claude Personal is the preferred reviewer; with one slot it stays off the code list
+  # and escalation meanwhile.
+  tech_lead: claude-team-lead
   default_worker: antigravity-worker          # Gemini 3.8 Flash high; falls back to Argon 4
   workers: [antigravity-argon]
-  reviewers: [antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
+  reviewers: [claude-personal-worker, antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
   review_policy: always                       # every task gets an independent review before approval
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
   # Local-only files mirrored from the owner's Mac checkout (read-only, never committed): ROM dump
