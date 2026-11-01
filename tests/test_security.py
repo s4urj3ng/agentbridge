@@ -291,3 +291,23 @@ def test_hardware_no_go_ignores_negated_and_analysis_mentions():
            "Don't hesitate to flash the firmware once tests pass", "Never wait: write the image to the SD card now"]
     for t in bad:
         assert hardware_no_go_hits(t, cats), t
+
+
+def test_a_repeated_policy_block_without_new_commits_reaches_the_tech_lead(settings, tmp_path):
+    """A revision that leaves the branch head unchanged and is blocked again must still wake the Tech Lead."""
+    script_agent(settings, "mock-lead", [
+        {"rationale": "x", "decisions": [{"type": "CREATE_TASKS", "tasks": [
+            {"key": "ci", "title": "notes", "description": "notes", "assignee": "mock-worker", "kind": "research",
+             "acceptance_criteria": ["ok"], "allowed_paths": ["docs/**"]}]}]},
+        {"rationale": "x", "decisions": [{"type": "REQUEST_REVISION", "task_id": 1, "feedback": "stay in docs/"}]},
+        {"rationale": "x", "decisions": [{"type": "BLOCK_TASK", "task_id": 1, "reason": "policy"}]},
+    ], tmp_path)
+    e = make_engine(settings)
+    register(e, tmp_path)
+    e.submit_goal("demo-calc", "notes", "S5b")
+    run(e, 40)
+    heads = {r["sha"] for r in q(e, "SELECT sha FROM git_refs WHERE kind='task_head'")}
+    assert len(q(e, "SELECT id FROM validation_runs")) == 2 and len(heads) == 1      # same head both times
+    assert q(e, "SELECT COUNT(*) c FROM events WHERE type='TASK_BLOCKED'")[0]["c"] == 2
+    second = q(e, "SELECT id FROM events WHERE type='TASK_BLOCKED' ORDER BY id DESC LIMIT 1")[0]["id"]
+    assert q(e, "SELECT COUNT(*) c FROM execution_attempts WHERE purpose='tech_lead' AND event_id=?", second)[0]["c"] >= 1

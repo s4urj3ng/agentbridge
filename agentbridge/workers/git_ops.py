@@ -268,16 +268,42 @@ class GitWorkspace:
             diff = diff[:max_diff_bytes] + "\n... [diff truncated]\n"
         return ChangeSet(list(files.values()), diff, base_sha, head)
 
+    def inherited_paths(self, path: Path, cs: ChangeSet, paths: list[str]) -> set[str]:
+        """Paths of `paths` that the task branch took unchanged from a branch it merged in.
+
+        A worker that merges the integration branch (to resolve a conflict) brings other tasks' files
+        into its diff against the base. A path counts as inherited when HEAD holds exactly what the
+        merged-in parent of some merge commit in base..HEAD holds (both absent counts too).
+        """
+        if not paths:
+            return set()
+
+        def blob(ref: str, p: str) -> str | None:
+            r = run_cmd(["git", "rev-parse", "--verify", "-q", f"{ref}:{p}"], cwd=path)
+            return r.stdout.strip() if r.exit_code == 0 else None
+
+        out: set[str] = set()
+        merges = git(path, "rev-list", "--merges", f"{cs.base_sha}..{cs.head_sha}").split()
+        for m in merges:
+            for parent in git(path, "rev-list", "--parents", "-n", "1", m).split()[2:]:
+                for p in paths:
+                    if p not in out and blob(cs.head_sha, p) == blob(parent, p):
+                        out.add(p)
+        return out
+
     def unexpected_changes(self, path: Path, cs: ChangeSet, *, forbidden: list[str], allowed: list[str],
                            max_files: int) -> list[str]:
         problems = []
-        if len(cs.files) > max_files:
-            problems.append(f"too many changed files: {len(cs.files)} > {max_files}")
+        outside = [f["path"] for f in cs.files if allowed and not path_matches(f["path"], allowed)]
+        inherited = self.inherited_paths(path, cs, outside)
+        own = len(cs.files) - len(inherited)
+        if own > max_files:
+            problems.append(f"too many changed files: {own} > {max_files}")
         for f in cs.files:
             p = f["path"]
             if path_matches(p, forbidden):
                 problems.append(f"forbidden path modified: {p}")
-            if allowed and not path_matches(p, allowed):
+            if p in outside and p not in inherited:
                 problems.append(f"path outside task scope: {p}")
             full = path / p
             if full.is_symlink():

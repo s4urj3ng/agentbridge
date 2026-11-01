@@ -89,3 +89,23 @@ def test_merge_conflict_aborts_without_reset(tmp_path):
     assert git(integ, "rev-parse", "HEAD") == head
     assert git(integ, "status", "--porcelain") == ""
     assert git(t2, "rev-parse", "HEAD")  # t2's work still exists on its branch
+
+
+def test_scope_check_ignores_files_merged_in_from_another_branch(tmp_path):
+    ws, repo = _ws(tmp_path)
+    base = ws.resolve("main")
+    other = ws.create_worktree(tmp_path / "wts" / "o", "agentbridge/p/m/integration", base)
+    (other / "sheet.md").write_text("another task's file\n")
+    ws.commit_all(other, "other task")
+    task = ws.create_worktree(tmp_path / "wts" / "t", "agentbridge/p/m/t", base)
+    (task / "trace.md").write_text("own work\n")
+    ws.commit_all(task, "own work")
+    git(task, "merge", "-q", "--no-ff", "-m", "merge integration", "agentbridge/p/m/integration")
+    cs = ws.changes(task, base)
+    assert {f["path"] for f in cs.files} == {"trace.md", "sheet.md"}
+    assert ws.unexpected_changes(task, cs, forbidden=[], allowed=["trace.md"], max_files=1) == []
+    (task / "sheet.md").write_text("edited by this task\n")      # touching the merged-in file is still flagged
+    ws.commit_all(task, "edit foreign file")
+    cs = ws.changes(task, base)
+    assert ws.unexpected_changes(task, cs, forbidden=[], allowed=["trace.md"], max_files=5) == [
+        "path outside task scope: sheet.md"]

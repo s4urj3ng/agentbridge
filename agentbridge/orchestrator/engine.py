@@ -1564,7 +1564,7 @@ class Engine:
                 with tx(self.conn):
                     evq.emit(self.conn, "TASK_BLOCKED", project_id=t["project_id"], milestone_id=t["milestone_id"],
                              task_id=task_id, payload={"reason": f"policy violations: {reason[:800]}"},
-                             dedupe_key=f"blocked:{task_id}:policy:{cs.head_sha}")
+                             dedupe_key=f"blocked:{task_id}:policy:{t['state_version']}")   # every blocked run reaches the Tech Lead
             return
         if not vres.passed:
             fb = "Deterministic validation failed:\n" + "\n".join(
