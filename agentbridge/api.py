@@ -33,7 +33,7 @@ from .dashboard import views
 from .db import audit, connect, jload, migrate, now_iso, row, rows, tx
 from .integrations.github import record_delivery, verify_signature
 from .orchestrator import events as evq
-from .orchestrator import quota
+from .orchestrator import overrides, quota
 from .orchestrator.engine import Engine
 from .policies.manifest import Manifest
 from .policies.safety import PolicyViolation, read_confined, redact
@@ -320,21 +320,19 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(404)
         if action in ("pause", "resume"):
             quota.set_paused(conn, agent_id, action == "pause", actor)
+        # Stored as owner overrides (as from Telegram), so a config sync (any CLI command, a restart)
+        # does not put the config file's values back.
         elif action in ("enable", "disable"):
-            with tx(conn):
-                conn.execute("UPDATE agents SET enabled=? WHERE id=?", (int(action == "enable"), agent_id))
-                audit(conn, actor, f"agent.{action}", agent=agent_id)
+            overrides.set_override(conn, "agent", agent_id, "enabled", action == "enable", actor)
         elif action == "concurrency":
             if "json" in request.headers.get("content-type", ""):
                 value = (await request.json()).get("value")
             else:
                 value = (await request.form()).get("value")
-            n = int(value)
-            if not 0 <= n <= 8:
-                raise HTTPException(400, "concurrency must be 0..8")
-            with tx(conn):
-                conn.execute("UPDATE agents SET max_concurrency=? WHERE id=?", (n, agent_id))
-                audit(conn, actor, "agent.concurrency", agent=agent_id, value=n)
+            try:
+                overrides.set_override(conn, "agent", agent_id, "max_concurrency", int(value), actor)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"concurrency must be 0..{overrides.MAX_CONCURRENCY}")
         else:
             raise HTTPException(404)
         return {"ok": True}

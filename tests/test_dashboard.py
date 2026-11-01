@@ -92,3 +92,16 @@ def test_attempt_records_the_model_it_ran_on(client):  # noqa: F811
     run(e, 5)
     lead = q(e, "SELECT model FROM execution_attempts WHERE purpose='tech_lead' ORDER BY id LIMIT 1")
     assert lead and lead[0]["model"] == "mock-model-1"
+
+
+def test_dashboard_agent_settings_survive_a_config_sync(client):  # noqa: F811
+    c, e = client
+    assert c.post("/api/agents/mock-worker/concurrency", json={"value": 6}, headers=H).status_code == 200
+    assert c.post("/api/agents/mock-worker-b/disable", headers=H).status_code == 200
+    assert c.post("/api/agents/mock-worker/concurrency", json={"value": 9}, headers=H).status_code == 400
+    e.sync_agents()                                   # what every CLI command and restart does
+    a = {r["id"]: r for r in q(e, "SELECT id, max_concurrency, enabled FROM agents")}
+    assert a["mock-worker"]["max_concurrency"] == 6 and a["mock-worker-b"]["enabled"] == 0
+    assert c.post("/api/agents/mock-worker-b/enable", headers=H).status_code == 200
+    e.sync_agents()
+    assert q(e, "SELECT enabled FROM agents WHERE id='mock-worker-b'")[0]["enabled"] == 1
