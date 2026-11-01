@@ -69,7 +69,8 @@ def create_app(settings: Settings) -> FastAPI:
     engine.sync_agents()
     secret = settings.session_secret.encode()
     clock = views.Clock((settings.telegram or {}).get("timezone", "Asia/Seoul"))
-    TEMPLATES.env.globals.update(t=clock, until=clock.until, STATE_VI=views.STATE_VI, BUCKET_VI=views.BUCKET_VI)
+    TEMPLATES.env.globals.update(t=clock, until=clock.until, STATE_VI=views.STATE_VI, BUCKET_VI=views.BUCKET_VI,
+                                  tok=views.tok)
     failures: dict[str, list[float]] = {}
 
     @app.middleware("http")
@@ -682,6 +683,20 @@ def create_app(settings: Settings) -> FastAPI:
     async def agent_form(request: Request, agent_id: str, action: str, actor: str = Depends(auth)):
         await api_agent_action(agent_id, action, request, actor)
         return RedirectResponse("/agents", status_code=303)
+
+    def usage_args(project: str | None, days: str | None) -> tuple[str | None, int | None]:
+        d = int(days) if days and days.isdigit() and int(days) > 0 else None
+        return (project or None), d
+
+    @app.get("/api/usage")
+    def api_usage(project: str | None = None, days: str | None = None, actor: str = Depends(auth)):
+        u = views.token_usage(conn, *usage_args(project, days))
+        return {k: u[k] for k in ("by_model", "by_project", "total", "project", "days")}
+
+    @app.get("/usage", response_class=HTMLResponse)
+    def usage_page(request: Request, project: str | None = None, days: str | None = None,
+                   actor: str = Depends(auth)):
+        return page(request, "usage.html", u=views.token_usage(conn, *usage_args(project, days)))
 
     @app.get("/approvals", response_class=HTMLResponse)
     def approvals_page(request: Request, actor: str = Depends(auth)):

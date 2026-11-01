@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ..db import jload, parse_ts, row, rows, utcnow
+from ..db import jload, now_iso, parse_ts, row, rows, utcnow
 from ..reporting import milestone_progress, quota_report
 
 STATE_VI = {"CREATED": "mới tạo", "QUEUED": "trong hàng đợi", "DISPATCHED": "đang giao", "RUNNING": "đang làm",
@@ -258,3 +258,50 @@ def command_thread(conn: sqlite3.Connection, project_id: int, limit: int = 30) -
                       "milestone": keys.get(dcs["milestone_id"], ""), "ok": dcs["status"] == "applied"})
     items.sort(key=lambda i: i["at"])
     return items[-limit:]
+
+
+USAGE_PERIODS = [(None, "Toàn bộ"), (30, "30 ngày"), (7, "7 ngày"), (1, "24 giờ")]
+
+
+def tok(n: int | None) -> str:
+    """Token counts for humans: 1234 → 1.2K, 96343424 → 96.3M."""
+    n = int(n or 0)
+    for size, unit in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if n >= size:
+            return f"{n / size:.1f}{unit}"
+    return str(n)
+
+
+def token_usage(conn: sqlite3.Connection, project: str | None = None, days: int | None = None) -> dict[str, Any]:
+    """Tokens every agent call reported, by model and by project, all-time or over the last `days`.
+
+    An attempt belongs to its task's project, or to its triggering event's project (Tech Lead calls).
+    Attempts from before the `model` column use the agent's configured model. Input tokens include
+    cache reads/writes where the provider reports them (Claude, Codex).
+    """
+    where, args = ["1=1"], []
+    if days:
+        where.append("a.started_at >= ?")
+        args.append(now_iso(-days * 86400))
+    if project:
+        where.append("p.slug = ?")
+        args.append(project)
+    base = ("FROM execution_attempts a JOIN agents g ON g.id=a.agent_id LEFT JOIN tasks t ON t.id=a.task_id "
+            "LEFT JOIN events e ON e.id=a.event_id LEFT JOIN projects p ON p.id=COALESCE(t.project_id, e.project_id) "
+            f"WHERE {' AND '.join(where)}")
+    sums = ("COUNT(*) calls, SUM(a.input_tokens IS NOT NULL) reported, COALESCE(SUM(a.input_tokens),0) inp, "
+            "COALESCE(SUM(a.output_tokens),0) outp, SUM(a.cost_usd_reported) usd")
+    model = "COALESCE(a.model, json_extract(g.config_json,'$.model'), g.provider)"
+    by_model = [dict(r) for r in rows(conn, f"SELECT {model} model, g.provider, GROUP_CONCAT(DISTINCT a.agent_id) agents, "
+                                            f"{sums} {base} GROUP BY 1, 2 ORDER BY inp + outp DESC", *args)]
+    by_project = [dict(r) for r in rows(conn, f"SELECT COALESCE(p.slug, '—') slug, {sums} {base} "
+                                              "GROUP BY 1 ORDER BY inp + outp DESC", *args)]
+    total = dict(row(conn, f"SELECT {sums} {base}", *args))
+    grand = (total["inp"] + total["outp"]) or 1
+    for r in by_model + by_project + [total]:
+        r["total"] = r["inp"] + r["outp"]
+        r["share"] = round(100 * r["total"] / grand, 1)
+    for r in by_model:
+        r["agents"] = sorted((r["agents"] or "").split(","))
+    return {"by_model": by_model, "by_project": by_project, "total": total, "project": project, "days": days,
+            "periods": USAGE_PERIODS, "projects": [r["slug"] for r in rows(conn, "SELECT slug FROM projects ORDER BY id")]}

@@ -59,3 +59,36 @@ def test_user_password_login_replaces_token_form(client, monkeypatch):  # noqa: 
     assert c.get("/", headers={"accept": "text/html"}, follow_redirects=False).headers["location"] == "/login"
     failed = q(e, "SELECT detail_json FROM audit_log WHERE action='auth.login_failed'")
     assert len(failed) == 3 and all("wrong" not in f["detail_json"] and "root" not in f["detail_json"] for f in failed)
+
+
+def test_usage_page_totals_tokens_by_model_and_project(client):  # noqa: F811
+    c, e = client
+    e.submit_goal("demo-calc", "Fix add() and implement mul()", "TOK1")
+    run(e, 20)
+    att = q(e, "SELECT id, agent_id, model FROM execution_attempts ORDER BY id")
+    assert len(att) >= 2
+    assert all(a["model"] is None for a in att if a["agent_id"].startswith("mock"))   # mocks configure no model
+    e.conn.execute("UPDATE execution_attempts SET input_tokens=1000000, output_tokens=200000, model='opus-x', "
+                   "cost_usd_reported=1.5 WHERE id=?", (att[0]["id"],))
+    e.conn.execute("UPDATE execution_attempts SET input_tokens=300000, output_tokens=0, started_at='2020-01-01T00:00:00+00:00' "
+                   "WHERE id=?", (att[1]["id"],))
+    u = c.get("/api/usage", headers=H).json()
+    assert u["total"]["inp"] == 1_300_000 and u["total"]["outp"] == 200_000 and u["total"]["usd"] == 1.5
+    top = u["by_model"][0]
+    assert top["model"] == "opus-x" and top["total"] == 1_200_000 and top["share"] == 80.0
+    assert [p["slug"] for p in u["by_project"]][0] == "demo-calc"
+    recent = c.get("/api/usage?days=7", headers=H).json()
+    assert recent["total"]["inp"] == 1_000_000 and recent["days"] == 7     # the 2020 call drops out
+    assert c.get("/api/usage?project=nope", headers=H).json()["total"]["calls"] == 0
+    r = c.get("/usage?days=30&project=demo-calc", headers=H)
+    assert r.status_code == 200 and "opus-x" in r.text and "1.2M" in r.text and "$1.50" in r.text
+    assert 'href="/usage"' in c.get("/", headers=H).text
+
+
+def test_attempt_records_the_model_it_ran_on(client):  # noqa: F811
+    c, e = client
+    next(a for a in e.s.agents if a["id"] == "mock-lead")["model"] = "mock-model-1"   # synced on run()
+    e.submit_goal("demo-calc", "Fix add()", "TOK2")
+    run(e, 5)
+    lead = q(e, "SELECT model FROM execution_attempts WHERE purpose='tech_lead' ORDER BY id LIMIT 1")
+    assert lead and lead[0]["model"] == "mock-model-1"

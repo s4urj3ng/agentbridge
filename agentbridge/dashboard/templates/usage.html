@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Token · AgentBridge{% endblock %}
+{% block head %}<style>
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.share{display:grid;grid-template-columns:70px 44px;gap:8px;align-items:center;justify-content:end}
+.share .mbar span{background:var(--accent)}
+.filters a.chip{text-decoration:none}.filters a.chip.on{background:var(--accent-soft);color:var(--accent)}
+td.total,th.total{font-weight:600}
+.model b{white-space:nowrap}
+@media (max-width:640px){.agents-col{display:none}}
+</style>{% endblock %}
+{% macro qs(project, days) %}?{% if project %}project={{ project|urlencode }}&amp;{% endif %}{% if days %}days={{ days }}{% endif %}{% endmacro %}
+{% macro usd(v) %}{{ '$%.2f'|format(v) if v else '—' }}{% endmacro %}
+{% block body %}
+<h1>Token đã dùng</h1>
+<p class="sub">Tổng token mọi lần gọi agent đã báo về, theo model và theo dự án. Input gồm cả token cache (Claude, Codex). Chi phí $ chỉ có khi provider tự báo (Claude Code).</p>
+
+<div class="row filters" style="margin-bottom:14px">
+  {% for d, label in u.periods %}<a class="chip {{ 'on' if u.days == d }}" href="/usage{{ qs(u.project, d) }}">{{ label }}</a>{% endfor %}
+  <form class="inline row" method="get" action="/usage" style="margin-left:auto">
+    {% if u.days %}<input type="hidden" name="days" value="{{ u.days }}">{% endif %}
+    <select name="project" onchange="this.form.submit()">
+      <option value="">Tất cả dự án</option>
+      {% for p in u.projects %}<option value="{{ p }}" {{ 'selected' if u.project == p }}>{{ p }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Tổng token</div><div class="num" style="text-align:left" title="{{ '{:,}'.format(u.total.total) }}">{{ tok(u.total.total) }}</div></div>
+  <div class="card kpi"><div class="label">Input</div><div class="num" style="text-align:left" title="{{ '{:,}'.format(u.total.inp) }}">{{ tok(u.total.inp) }}</div></div>
+  <div class="card kpi"><div class="label">Output</div><div class="num" style="text-align:left" title="{{ '{:,}'.format(u.total.outp) }}">{{ tok(u.total.outp) }}</div></div>
+  <div class="card kpi"><div class="label">Lần gọi</div><div class="num" style="text-align:left">{{ u.total.calls }}</div><div class="muted small">{{ u.total.reported or 0 }} có báo token</div></div>
+  <div class="card kpi"><div class="label">Chi phí báo về</div><div class="num" style="text-align:left">{{ usd(u.total.usd) }}</div><div class="muted small">chỉ Claude Code</div></div>
+</div>
+
+<h2>Theo model</h2>
+<div class="card scroll">
+{% if u.by_model %}
+<table>
+<tr><th>Model</th><th class="agents-col">Agent</th><th class="num">Lần gọi</th><th class="num">Input</th><th class="num">Output</th><th class="num total">Tổng</th><th class="num">Tỉ lệ</th><th class="num">$ báo về</th></tr>
+{% for r in u.by_model %}
+<tr>
+  <td class="model"><b>{{ r.model }}</b><div class="muted small">{{ r.provider }}</div></td>
+  <td class="small agents-col">{{ r.agents|join(', ') }}</td>
+  <td class="num">{{ r.calls }}{% if r.reported < r.calls %}<div class="muted small">{{ r.calls - r.reported }} không báo</div>{% endif %}</td>
+  <td class="num" title="{{ '{:,}'.format(r.inp) }}">{{ tok(r.inp) }}</td>
+  <td class="num" title="{{ '{:,}'.format(r.outp) }}">{{ tok(r.outp) }}</td>
+  <td class="num total" title="{{ '{:,}'.format(r.total) }}">{{ tok(r.total) }}</td>
+  <td class="num"><div class="share"><div class="mbar"><span style="width:{{ r.share }}%"></span></div><span>{{ r.share }}%</span></div></td>
+  <td class="num">{{ usd(r.usd) }}</td>
+</tr>
+{% endfor %}
+<tr><td class="total">Tổng</td><td class="agents-col"></td><td class="num total">{{ u.total.calls }}</td><td class="num total">{{ tok(u.total.inp) }}</td><td class="num total">{{ tok(u.total.outp) }}</td><td class="num total">{{ tok(u.total.total) }}</td><td></td><td class="num total">{{ usd(u.total.usd) }}</td></tr>
+</table>
+{% else %}<div class="empty">Chưa có lần gọi nào trong khoảng này.</div>{% endif %}
+</div>
+
+{% if not u.project %}
+<h2>Theo dự án</h2>
+<div class="card scroll">
+{% if u.by_project %}
+<table>
+<tr><th>Dự án</th><th class="num">Lần gọi</th><th class="num">Input</th><th class="num">Output</th><th class="num total">Tổng</th><th class="num">Tỉ lệ</th><th class="num">$ báo về</th></tr>
+{% for r in u.by_project %}
+<tr>
+  <td class="model">{% if r.slug != '—' %}<a href="/usage{{ qs(r.slug, u.days) }}"><b>{{ r.slug }}</b></a>{% else %}<span class="muted">không thuộc dự án</span>{% endif %}</td>
+  <td class="num">{{ r.calls }}</td>
+  <td class="num" title="{{ '{:,}'.format(r.inp) }}">{{ tok(r.inp) }}</td>
+  <td class="num" title="{{ '{:,}'.format(r.outp) }}">{{ tok(r.outp) }}</td>
+  <td class="num total" title="{{ '{:,}'.format(r.total) }}">{{ tok(r.total) }}</td>
+  <td class="num"><div class="share"><div class="mbar"><span style="width:{{ r.share }}%"></span></div><span>{{ r.share }}%</span></div></td>
+  <td class="num">{{ usd(r.usd) }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}<div class="empty">Chưa có dữ liệu.</div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

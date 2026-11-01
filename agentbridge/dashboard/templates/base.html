@@ -100,7 +100,7 @@ main.wide{max-width:none}
   <a class="brand" href="/"><span class="dot {{ 'up' if engine_up }}" title="engine {{ 'đang chạy' if engine_up else 'đang dừng' }}"></span>AgentBridge</a>
   {% if nav != 'login' %}
   <nav class="tabs">
-    {% for href, label, key in [("/", "Tổng quan", "overview"), ("/projects", "Dự án", "projects"), ("/agents", "Agent & quota", "agents"), ("/approvals", "Chờ duyệt", "approvals"), ("/settings", "Cài đặt", "settings")] %}
+    {% for href, label, key in [("/", "Tổng quan", "overview"), ("/projects", "Dự án", "projects"), ("/agents", "Agent & quota", "agents"), ("/usage", "Token", "usage"), ("/approvals", "Chờ duyệt", "approvals"), ("/settings", "Cài đặt", "settings")] %}
     <a href="{{ href }}" class="{{ 'on' if nav == key or (key=='projects' and nav in ('project','task','graph','project_new')) else '' }}">{{ label }}{% if key == 'approvals' and pending %}<span class="badge">{{ pending }}</span>{% endif %}</a>
     {% endfor %}
   </nav>

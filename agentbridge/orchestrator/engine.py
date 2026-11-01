@@ -655,9 +655,9 @@ class Engine:
         with tx(self.conn):
             aid = self.conn.execute(
                 "INSERT INTO execution_attempts (task_id, agent_id, purpose, status, nonce, run_dir, cwd, started_at, "
-                "deadline_at, event_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "deadline_at, event_id, model) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (task_id, agent_id, purpose, "STARTING", nonce, str(run_dir), str(cwd), now_iso(),
-                 now_iso(timeout_s + 30), event_id)).lastrowid
+                 now_iso(timeout_s + 30), event_id, model or ad.config.get("model"))).lastrowid
             quota.record_start(self.conn, agent_id, aid, purpose)
             self._artifact(task_id, aid, "prompt", run_dir / "prompt.redacted.txt")
         pid = process.spawn_detached(inv.argv, run_dir=run_dir, cwd=inv.cwd, nonce=nonce, timeout_s=timeout_s,
