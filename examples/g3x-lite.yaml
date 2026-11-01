@@ -11,9 +11,11 @@ project:
   repo_path: /srv/agentbridge/repos/g3x-lite      # git clone https://github.com/s4urj3ng/g3x-lite
   remote_url: https://github.com/s4urj3ng/g3x-lite
   base_branch: main
-  tech_lead: claude-team-lead
+  # 2026-11-01: Claude Team is out of quota, so Claude Personal leads for now. It has one slot,
+  # so it is taken off the code list and escalation until claude-team-lead is back.
+  tech_lead: claude-personal-worker
   default_worker: antigravity-worker          # Gemini 3.8 Flash high; falls back to Argon 4
-  workers: [antigravity-argon, claude-personal-worker]
+  workers: [antigravity-argon]
   reviewers: [antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
   review_policy: always                       # every task gets an independent review before approval
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
@@ -66,9 +68,10 @@ policy:
   self_approve: true
   self_merge: true
   draft_pr: auto
-  # A task sent back 3 times moves to Claude Personal (Opus 5.5) for its next revision.
+  # A task sent back 3 times moves to a stronger worker for its next revision (Claude Personal
+  # while it is not the Tech Lead; Argon 4 meanwhile).
   escalate_after_revisions: 3
-  escalation_worker: claude-personal-worker
+  escalation_worker: antigravity-argon
   # The tracked boot prototype (chdk-port/platform/g3x/sub/110c/*) and the payload/loader sources
   # in firmware/tools (.S, .m, .json) are editable since 2026-10-30. Build outputs, ROM bytes and
   # toolchains are never committed. AGENTS.md is the owner's contract.
