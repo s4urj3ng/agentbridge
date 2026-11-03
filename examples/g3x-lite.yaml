@@ -88,10 +88,21 @@ limits:
   max_revisions: 8                 # autonomous mode: room for review/revise cycles
 
 charter: |
-  Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. Current objective (owner,
-  2026-10-30): reach the first boot, i.e. a corrected first-boot witness candidate (DISKBOOT.BIN
-  plus witness inspector) that the owner can try on the camera by hand, with a written trial and
-  recovery plan for the owner.
+  Port CHDK to the Canon PowerShot G3 X running firmware GM1.10C. First boot is reached (owner trials
+  2026-11-02: the PORT-25 combined candidate runs the whole boot prologue, Codes 11..44, and hands
+  off to the stock UI on a held press). Current objective (owner, 2026-11-03): the CHDK GUI track,
+  in order: (1) CHDK stays resident after the sub_fc0d0126 handoff, shown by an LED heartbeat task;
+  (2) find the bitmap/OSD framebuffer and draw a test overlay on the stock UI; (3) hook
+  task_PhySw/kbd so CHDK reads buttons and toggles ALT mode, folding in the short-press shutdown
+  fix; (4) bring up the standard CHDK GUI/ALT menu. Every step ends in an opt-in candidate the
+  owner can try by hand, with a written trial and recovery plan. Held press is the boot method
+  until step 3.
+  Experimental candidates (owner, 2026-11-03): static ROM reading alone could not VERIFY the
+  CreateTask calling convention (PORT-29..31 NO-GO). An opt-in candidate may rely on INFERRED
+  evidence, such as conventions from other DIGIC 6 CHDK ports, when the inference is labelled and
+  cited, the owner trial is designed to confirm or refute it, and the candidate runs from RAM only
+  with a battery-pull recovery. The owner trial result is the verification. The default build
+  stays byte-identical.
   Allowed on the host: reading the GM1.10C ROM dump (firmware/dumps/GM1.10C/PRIMARY.BIN, present in
   every worktree), editing the tracked boot prototype (chdk-port/platform/g3x/sub/110c/), building
   candidates with the pinned toolchain (toolchains/gcc-arm-none-eabi-5_4-2016q3) and the local
