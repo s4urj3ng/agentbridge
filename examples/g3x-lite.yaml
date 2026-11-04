@@ -20,6 +20,18 @@ project:
   reviewers: [claude-personal-worker, antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
   review_policy: always                       # every task gets an independent review before approval
   review_risk_paths: ["chdk-port/**", "**/*.S", "**/stubs_*", "tools/**"]
+  # Owner 2026-11-04: reviews were looping on wording (PORT-24 had 46 revisions; PORT-32 T1 reached
+  # revision 7 over provenance phrasing).
+  review_guidance: |
+    Request changes only for blocking issues: a wrong address, offset or CPU mode; code that does not
+    build or breaks a test; a changed default build or a changed PORT-24/25 output; a safety rule
+    broken (flashing, card or camera actions, committed ROM bytes or binaries); a claim labelled
+    VERIFIED with no evidence at all; or an acceptance criterion clearly not met.
+    Everything else is a note and does not block approval: wording, citation formatting, line
+    numbers off by a few, a label that could be stricter, extra or missing detail in docs. List
+    notes under issues prefixed "[note]" and still return verdict approve.
+    Citing the local CHDK tree under chdk-port/ (other camera ports, untracked) by path:line as
+    INFERRED / HISTORICAL_CHDK evidence is allowed.
   # Local-only files mirrored from the owner's Mac checkout (read-only, never committed): ROM dump
   # firmware/dumps/GM1.10C/PRIMARY.BIN, the full CHDK tree under chdk-port/, local build/validate
   # scripts in tools/, local research docs, candidate_port2a/ (pre-correction), and
@@ -103,6 +115,19 @@ charter: |
   cited, the owner trial is designed to confirm or refute it, and the candidate runs from RAM only
   with a battery-pull recovery. The owner trial result is the verification. The default build
   stays byte-identical.
+  Process rules (owner, 2026-11-04):
+  - Every milestone ends in an opt-in candidate plus a short owner trial plan, or stops early with
+    the reason. Do not run separate "ingest" milestones or write new report classifier/decoder
+    tools for upcoming trials. The Tech Lead reads the owner's trial notes directly and uses the
+    result in the next build milestone.
+  - Keep milestones small: one research task when needed, then the build, tests and trial plan.
+    The build task starts as soon as its inputs exist; do not wait for docs to be polished.
+  - Research/doc tasks get at most 2 revision requests. After that, approve and carry any leftover
+    nits as notes. Reviewer wording or citation-format comments are notes, not revisions.
+  - The full local CHDK tree under chdk-port/ (other DIGIC 6 ports such as their stubs_entry.S,
+    boot.c and capt_seq.c) is untracked but present in every worktree. It may be read and cited by
+    path:line as INFERRED / HISTORICAL_CHDK evidence.
+  - Docs stay short: a table of assumptions and evidence beats long prose.
   Allowed on the host: reading the GM1.10C ROM dump (firmware/dumps/GM1.10C/PRIMARY.BIN, present in
   every worktree), editing the tracked boot prototype (chdk-port/platform/g3x/sub/110c/), building
   candidates with the pinned toolchain (toolchains/gcc-arm-none-eabi-5_4-2016q3) and the local

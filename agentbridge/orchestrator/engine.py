@@ -1602,7 +1602,7 @@ class Engine:
             diff = Path(art["path"]).read_text(errors="replace")
         vr = row(self.conn, "SELECT results_json FROM validation_runs WHERE task_id=? ORDER BY id DESC LIMIT 1", task_id)
         vsum = "; ".join(f"{r['name']}={'PASS' if r['exit_code'] == 0 else 'FAIL'}" for r in jload(vr["results_json"], [])) if vr else "n/a"
-        prompt = build_review_prompt(t, diff=diff, validation_summary=vsum)
+        prompt = build_review_prompt(t, diff=diff, validation_summary=vsum, guidance=m.project.review_guidance)
         aid = self._start_attempt(t["reviewer"], "review", task_id=task_id, event_id=None, prompt=prompt, cwd=path,
                                   schema=review_result_schema(), timeout_s=self.s.limits.tech_lead_timeout_s)
         await self._finish_review_attempt(aid, path)

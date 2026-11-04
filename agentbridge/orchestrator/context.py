@@ -266,7 +266,8 @@ def build_worker_prompt(task: sqlite3.Row, *, project: sqlite3.Row, manifest: di
     return "\n\n".join(parts)
 
 
-def build_review_prompt(task: sqlite3.Row, *, diff: str, validation_summary: str, focus: str = "") -> str:
+def build_review_prompt(task: sqlite3.Row, *, diff: str, validation_summary: str, focus: str = "",
+                        guidance: str = "") -> str:
     acc = jload(task["acceptance_json"], [])
     ex = diff_excerpt(diff)
     return "\n\n".join([
@@ -276,6 +277,7 @@ def build_review_prompt(task: sqlite3.Row, *, diff: str, validation_summary: str
         "## Acceptance criteria\n- " + "\n- ".join(acc),
         f"## Deterministic validation: {validation_summary}",
         f"## Review focus: {focus or 'correctness and acceptance criteria'}",
+        *([f"## Project review rules (owner)\n{guidance.strip()}"] if guidance.strip() else []),
         fence("diff", ex, DIFF_BUDGET + 500),
         "Respond with JSON: verdict (approve|changes_requested), summary, issues.",
         state_block({"task": {"id": task["id"], "key": task["key"]}, "diff": ex}),
