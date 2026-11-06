@@ -67,7 +67,11 @@ def test_probe_records_each_identity_and_drives_fallback(settings, tmp_path):
 
 def test_telegram_quota_view_probes_antigravity(settings, tmp_path):
     from agentbridge.integrations.telegram import TelegramBot
-    exe = _fake_agy(tmp_path, json.loads(FIXTURE.read_text()))
+    fixture = json.loads(FIXTURE.read_text())
+    for g in fixture["command"]["data"]["groups"]:      # keep every window in the future: a reset one shows "not measured"
+        for b in g["buckets"]:
+            b["reset_time"] = "2099-01-01T00:00:00Z"
+    exe = _fake_agy(tmp_path, fixture)
     settings.agents.append({"id": "agy-argon", "provider": "antigravity", "roles": ["worker"],
                             "model": "gemini-4-argon-high", "executable": exe})
     settings.telegram = {"allowed_chat_ids": [1], "timezone": "UTC"}
