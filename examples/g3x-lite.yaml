@@ -128,6 +128,20 @@ charter: |
     boot.c and capt_seq.c) is untracked but present in every worktree. It may be read and cited by
     path:line as INFERRED / HISTORICAL_CHDK evidence.
   - Docs stay short: a table of assumptions and evidence beats long prose.
+  Port by adaptation (owner, 2026-11-06): work like a normal CHDK port, not a re-derivation.
+  - reference/finsig_gm110c/ holds the output of CHDK's own signature finder (finsig_thumb2) run
+    by the owner on the GM1.10C ROM: stubs_entry.S (CreateTask, hook_CreateTask, task_* entries,
+    ~130 stubs), funcs_by_name.csv, funcs_by_address.csv, physw_bits.txt. Label these FINSIG.
+    FINSIG addresses may be used directly in candidates; a bounded ROM read is needed only where a
+    stub is missing, marked uncertain, or an owner trial contradicts it. Agents still never scan
+    the full ROM themselves.
+  - CHDK's own headers are the reference for firmware call signatures (e.g. include/lolevel.h:54
+    _CreateTask(name, prio, stack_size, entry, parm)). Do not reopen settled CHDK conventions.
+  - Sibling DIGIC 6 ports are present read-only under chdk-port/platform/: g7x, g5x, g16, sx60hs,
+    sx280hs, sx710hs (and g7x2, DIGIC 7). For each GUI-track step, start from the closest
+    sibling's file (boot.c task hooks and CreateTask replacement, capt_seq.c, movie_rec.c,
+    filewrite.c, kbd.c, lib.c, main.c), adapt it to GM1.10C with FINSIG and ROM evidence, and
+    record each adapted address in a short table. Code first: the candidate is the deliverable.
   Allowed on the host: reading the GM1.10C ROM dump (firmware/dumps/GM1.10C/PRIMARY.BIN, present in
   every worktree), editing the tracked boot prototype (chdk-port/platform/g3x/sub/110c/), building
   candidates with the pinned toolchain (toolchains/gcc-arm-none-eabi-5_4-2016q3) and the local
