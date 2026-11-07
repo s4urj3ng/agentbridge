@@ -250,3 +250,18 @@ def test_invalid_choices_rejected(setup):
     answers, _, _ = press(bot, fake, "cl:0:w:99:u", "cs:7", "cl:0:w:x:u", "cg:0:0:zz", "ca:0:w:99")
     assert all(a == "Nút không còn hợp lệ, mở lại." for a in answers), answers
     assert q(e, "SELECT COUNT(*) c FROM overrides")[0]["c"] == 1
+
+
+def test_stand_in_tech_lead(setup):
+    e, bot, fake = setup
+    e.s.agents.append({"id": "mock-lead-2", "provider": "mock", "roles": ["tech_lead", "worker"]})
+    e.sync_agents()
+    with pytest.raises(ValueError, match="tech_lead role"):
+        overrides.set_override(e.conn, "project", "demo-calc", "tech_lead", "mock-worker", TG)
+    overrides.set_override(e.conn, "project", "demo-calc", "tech_lead", "mock-lead-2", TG)
+    assert overrides.effective_project(e.conn, "demo-calc")["tech_lead"] == "mock-lead-2"
+    mid = e.submit_goal("demo-calc", "Fix add() and implement mul() in calc.py with tests", "TL2")
+    run(e, 120)
+    assert q(e, "SELECT status FROM milestones WHERE id=?", mid)[0]["status"] == "COMPLETED"
+    leads = {r["agent_id"] for r in q(e, "SELECT agent_id FROM execution_attempts WHERE purpose='tech_lead'")}
+    assert leads == {"mock-lead-2"}

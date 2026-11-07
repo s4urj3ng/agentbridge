@@ -7,6 +7,8 @@ project manifest:
   project (target = slug): workers   — ONE ordered list: item 1 is the default worker, the
                                        rest are its fallbacks in order;
                            reviewers — ONE ordered list: item 1 is the preferred reviewer.
+                           tech_lead — one agent id with the tech_lead role, e.g. a stand-in
+                                       while the manifest's Tech Lead is out of quota.
   agent   (target = id):   enabled, max_concurrency (and legacy fallback_to, still honoured).
 
 When a project has a role-order override, the quota fallback for that role is simply the
@@ -27,7 +29,7 @@ from typing import Any
 
 from ..db import audit, jdump, jload, now_iso, row, rows, tx
 
-PROJECT_KEYS = ("workers", "reviewers")
+PROJECT_KEYS = ("workers", "reviewers", "tech_lead")
 LEGACY_PROJECT_KEYS = ("default_worker",)
 AGENT_KEYS = ("fallback_to", "enabled", "max_concurrency")
 MAX_CONCURRENCY = 8
@@ -63,6 +65,8 @@ def apply_project(conn: sqlite3.Connection, m):
         m.project.default_worker, m.project.workers = code[0], code
     if "reviewers" in ov:
         m.project.reviewers = list(ov["reviewers"])
+    if "tech_lead" in ov:
+        m.project.tech_lead = ov["tech_lead"]
     return m
 
 
@@ -102,7 +106,7 @@ def eligible(conn: sqlite3.Connection, role: str) -> list[str]:
 
 
 def effective_project(conn: sqlite3.Connection, slug: str) -> dict[str, Any]:
-    """The ordered CODE (workers) and REVIEW lists after overrides, plus the read-only Tech Lead."""
+    """The ordered CODE (workers) and REVIEW lists and the Tech Lead, after overrides."""
     from ..policies.manifest import Manifest
     r = row(conn, "SELECT manifest_json FROM projects WHERE slug=?", slug)
     if r is None:
@@ -110,7 +114,7 @@ def effective_project(conn: sqlite3.Connection, slug: str) -> dict[str, Any]:
     m = Manifest.model_validate_json(r["manifest_json"])
     ov = get(conn, "project", slug)
     return {"workers": _code_list(ov, m.project.default_worker, m.project.workers),
-            "reviewers": list(ov.get("reviewers", m.project.reviewers)), "tech_lead": m.project.tech_lead,
+            "reviewers": list(ov.get("reviewers", m.project.reviewers)), "tech_lead": ov.get("tech_lead", m.project.tech_lead),
             "overridden": sorted(ov)}
 
 
@@ -122,6 +126,14 @@ def validate(conn: sqlite3.Connection, scope: str, target: str, key: str, value:
         if key not in PROJECT_KEYS:
             raise ValueError(f"unknown project setting {key!r}")
         cur = effective_project(conn, target)
+        if key == "tech_lead":
+            if not isinstance(value, str) or value not in agents:
+                raise ValueError(f"unknown agent {value!r}")
+            if "tech_lead" not in agents[value]["roles"]:
+                raise ValueError(f"{value} does not have the tech_lead role")
+            if not agents[value]["enabled"]:
+                raise ValueError(f"{value} is disabled")
+            return value
         role = "reviewer" if key == "reviewers" else "worker"
         ids = list(value or []) if isinstance(value, list) else None
         if ids is None or not all(isinstance(a, str) for a in ids):
