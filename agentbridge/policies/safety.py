@@ -60,6 +60,9 @@ def path_matches(path: str, patterns: Iterable[str]) -> bool:
             return True
         if pat.endswith("/**") and (path == pat[:-3] or path.startswith(pat[:-2])):
             return True
+        # "dir/" means everything under dir (the Tech Lead writes allowed paths this way)
+        if pat.endswith("/") and pat != "/" and path.startswith(pat):
+            return True
     return False
 
 
