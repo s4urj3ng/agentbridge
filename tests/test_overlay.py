@@ -72,3 +72,46 @@ def test_overlay_files_never_committed_even_without_ignore_rule(tmp_path):
     (path / "notes.md").write_text("real work\n")
     assert ws.commit_all(path, "work")
     assert git(path, "show", "--name-only", "--format=", "HEAD").split() == ["notes.md"]
+
+
+def _ws_and_path(tmp_path, name="t1"):
+    repo = create_demo_repo(tmp_path / "repo")
+    ws = GitWorkspace(repo, tmp_path / "wt", ["main"])
+    path = ws.create_worktree(tmp_path / "wt" / "p" / name, f"agentbridge/p/m/{name}", git(repo, "rev-parse", "main"))
+    return repo, ws, path
+
+
+def test_build_output_never_committed(tmp_path):
+    _, ws, path = _ws_and_path(tmp_path)
+    (path / "build" / "cand").mkdir(parents=True)
+    (path / "build" / "cand" / "DISKBOOT.BIN").write_bytes(b"\x00" * 16)
+    (path / "notes.md").write_text("real work\n")
+    assert ws.commit_all(path, "work")
+    assert git(path, "show", "--name-only", "--format=", "HEAD").split() == ["notes.md"]
+    assert git(path, "status", "--porcelain") == ""          # build output is ignored, worktree counts as clean
+    assert ws.commit_all(path, "nothing new") is None
+
+
+def test_build_output_committed_earlier_is_dropped(tmp_path):
+    repo, ws, path = _ws_and_path(tmp_path)
+    base = git(repo, "rev-parse", "main")
+    (path / "build").mkdir()
+    (path / "build" / "a.elf").write_bytes(b"\x7fELF")
+    git(path, "add", "-f", "build/a.elf")
+    git(path, "commit", "-q", "-m", "an earlier attempt swept in build output")
+    assert ws.commit_all(path, "cleanup")                     # no other change, still cleaned up
+    assert git(path, "diff", "--name-only", base, "HEAD") == ""
+    assert (path / "build" / "a.elf").exists()                # the file itself stays on disk
+
+
+def test_build_dir_tracked_on_mainline_is_left_alone(tmp_path):
+    repo = create_demo_repo(tmp_path / "repo")
+    (repo / "build").mkdir()
+    (repo / "build" / "keep.txt").write_text("tracked\n")
+    git(repo, "add", "build/keep.txt")
+    git(repo, "commit", "-q", "-m", "project tracks build/")
+    ws = GitWorkspace(repo, tmp_path / "wt", ["main"])
+    path = ws.create_worktree(tmp_path / "wt" / "p" / "t1", "agentbridge/p/m/t1", git(repo, "rev-parse", "main"))
+    (path / "build" / "new.txt").write_text("new\n")
+    assert ws.commit_all(path, "work")
+    assert git(path, "show", "--name-only", "--format=", "HEAD").split() == ["build/new.txt"]

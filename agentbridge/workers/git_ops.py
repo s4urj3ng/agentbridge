@@ -39,6 +39,8 @@ def git(repo: Path | str, *args: str, check: bool = True, timeout: float = 120) 
 GENERATED_EXCLUDES = [":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.pyc",
                       ":(exclude,glob)**/.pytest_cache/**", ":(exclude,glob)**/node_modules/**",
                       ":(exclude,glob)**/.mypy_cache/**", ":(exclude,glob)**/.ruff_cache/**"]
+# top-level dirs that hold generated build output; never committed unless the mainline already tracks them
+BUILD_OUTPUT_DIRS = ("build",)
 
 
 def dirty(path: Path | str) -> str:
@@ -189,19 +191,42 @@ class GitWorkspace:
         return out
 
     def _write_overlay_excludes(self, rels: list[str]) -> None:
+        self._write_exclude_block(self._EXCLUDE_BEGIN, self._EXCLUDE_END,
+                                  ["/" + re.sub(r"([\\[*?])", r"\\\1", r) for r in sorted(set(rels))])
+
+    _BUILD_BEGIN, _BUILD_END = "# >>> agentbridge build output", "# <<< agentbridge build output"
+
+    def _mainline(self) -> str | None:
+        for b in self.protected:
+            if any(c in b for c in "*?["):
+                continue
+            try:
+                return self.approved_base(b)
+            except GitError:
+                continue
+        return None
+
+    def _untracked_build_dirs(self) -> list[str]:
+        """Build output dirs that the mainline does not track (so anything in them is generated)."""
+        base = self._mainline()
+        if base is None:
+            return []
+        return [d for d in BUILD_OUTPUT_DIRS if not git(self.repo, "ls-tree", "--name-only", base, "--", d)]
+
+    def _write_exclude_block(self, begin: str, end: str, lines: list[str]) -> None:
         common = Path(git(self.repo, "rev-parse", "--git-common-dir"))
         exclude = (common if common.is_absolute() else self.repo / common) / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
         old = exclude.read_text() if exclude.exists() else ""
         keep, inside = [], False
         for line in old.splitlines():
-            if line == self._EXCLUDE_BEGIN:
+            if line == begin:
                 inside = True
-            elif line == self._EXCLUDE_END:
+            elif line == end:
                 inside = False
             elif not inside:
                 keep.append(line)
-        block = [self._EXCLUDE_BEGIN, *("/" + re.sub(r"([\\[*?])", r"\\\1", r) for r in sorted(set(rels))), self._EXCLUDE_END]
+        block = [begin, *lines, end]
         new = "\n".join(keep + block) + "\n"
         if new != old:
             exclude.write_text(new)
@@ -238,9 +263,17 @@ class GitWorkspace:
     # ---------------------------------------------------------- changes
     def commit_all(self, path: Path, message: str) -> str | None:
         """Commit any uncommitted worker changes. Returns new sha or None."""
-        if not dirty(path):
+        drop = self._untracked_build_dirs()
+        if drop:
+            self._write_exclude_block(self._BUILD_BEGIN, self._BUILD_END, [f"/{d}/" for d in drop])
+        stale = bool(drop) and bool(git(path, "ls-files", "--", *drop))
+        if not dirty(path) and not stale:
             return None
         git(path, "add", "-A", "--", ".", *GENERATED_EXCLUDES)
+        # build output (e.g. a candidate builder's build/ dir) is never committed when the mainline does not
+        # track it; this also drops any that an earlier attempt committed, so the task diff stays clean
+        if drop:
+            git(path, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *drop)
         # overlay files are never committed, even if an ignore rule went missing or a worker forced them in
         overlay = {r.as_posix() for r in self._overlay_files()}
         swept = [f for f in git(path, "diff", "--cached", "--name-only", "--diff-filter=A").splitlines() if f in overlay]
