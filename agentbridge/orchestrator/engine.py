@@ -288,6 +288,7 @@ class Engine:
     # the owner instead of looping on the Tech Lead's quota (it has no fallback)
     SELF_RESUME_MAX = 3
     GITHUB_RETRIES = 5        # attempts for a draft-PR / merge event hitting a transient GitHub error
+    AWAITING_TL = (S.REVIEW_PENDING, S.BLOCKED)   # task states only a Tech Lead decision moves on
 
     def _auto_approver(self, project_id: int, action: str, milestone_id: int | None) -> str | None:
         if action == "merge_protected":
@@ -834,10 +835,20 @@ class Engine:
                                    redact(jdump(res.structured or res.text[:4000])), "malformed", str(e)[:2000], now_iso()))
             self._tl_failed(ev, project, milestone, f"malformed response: {e}", lim)
             return
+        subject = row(self.conn, "SELECT id, state, state_version FROM tasks WHERE id=?", ev["task_id"]) \
+            if ev["task_id"] else None
         applied, rejected = self.apply_decisions(env, ev, project, milestone, attempt_id)
         if applied == 0:
             self._tl_failed(ev, project, milestone, "all decisions rejected: " + "; ".join(rejected)[:1500], lim)
             return
+        if rejected and subject is not None:
+            # Other decisions applied, but the event's own task still waits on the Tech Lead (e.g. an APPROVE_TASK
+            # was rejected). Marking the event DONE would strand that task forever, so ask again with the reason.
+            now = row(self.conn, "SELECT state, state_version FROM tasks WHERE id=?", subject["id"])
+            if now and now["state_version"] == subject["state_version"] and now["state"] in self.AWAITING_TL:
+                self._tl_failed(ev, project, milestone, f"task {subject['id']} is still {now['state']}; decisions "
+                                "about it were rejected: " + "; ".join(rejected)[:1400], lim)
+                return
         with tx(self.conn):
             evq.finish(self.conn, ev["id"], "DONE", "; ".join(rejected)[:2000] or None)
 

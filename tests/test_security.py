@@ -311,3 +311,28 @@ def test_a_repeated_policy_block_without_new_commits_reaches_the_tech_lead(setti
     assert q(e, "SELECT COUNT(*) c FROM events WHERE type='TASK_BLOCKED'")[0]["c"] == 2
     second = q(e, "SELECT id FROM events WHERE type='TASK_BLOCKED' ORDER BY id DESC LIMIT 1")[0]["id"]
     assert q(e, "SELECT COUNT(*) c FROM execution_attempts WHERE purpose='tech_lead' AND event_id=?", second)[0]["c"] >= 1
+
+
+def test_rejected_decision_for_event_task_is_asked_again(settings, tmp_path):
+    """APPROVE_TASK is rejected but another decision applies: the review event must not be closed while its task
+    still waits in REVIEW_PENDING (it would never get another Tech Lead decision)."""
+    script_agent(settings, "mock-lead", [
+        {"rationale": "x", "decisions": [{"type": "CREATE_TASKS", "tasks": [
+            {"key": "fix-add", "title": "Fix add", "description": "fix add", "assignee": "mock-worker",
+             "acceptance_criteria": ["ok"]}]}]},
+        {"rationale": "ship it and plan docs", "decisions": [
+            {"type": "APPROVE_TASK", "task_id": 1},
+            {"type": "CREATE_TASKS", "tasks": [{"key": "docs", "title": "Docs", "description": "docs",
+                                                "assignee": "mock-worker", "kind": "research",
+                                                "acceptance_criteria": ["ok"], "depends_on": ["fix-add"]}]}]},
+        {"rationale": "cannot approve yet", "decisions": [{"type": "BLOCK_TASK", "task_id": 1,
+                                                            "reason": "needs a review first"}]},
+    ], tmp_path)
+    e = make_engine(settings)
+    register(e, tmp_path, project_overrides={"review_policy": "always"})
+    e.submit_goal("demo-calc", "Fix add()", "S4b")
+    run(e, 40)
+    assert q(e, "SELECT state FROM tasks WHERE key='fix-add'")[0]["state"] == "BLOCKED"
+    ev = q(e, "SELECT status, attempts FROM events WHERE type='TASK_READY_FOR_REVIEW' AND task_id=1")[0]
+    assert ev == {"status": "DONE", "attempts": 2}                    # asked the Tech Lead a second time
+    assert q(e, "SELECT COUNT(*) c FROM tasks WHERE key='docs'")[0]["c"] == 1   # the applied part is kept once
