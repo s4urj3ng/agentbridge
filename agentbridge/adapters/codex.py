@@ -125,7 +125,9 @@ class CodexAdapter(AgentAdapter):
 
     def prepare(self, req: ExecRequest) -> Invocation:
         exe = self.executable or self.executable_default
-        sandbox = "workspace-write" if req.purpose == "work" else "read-only"
+        # `work_sandbox` (opt-in) widens work runs only, e.g. danger-full-access on a host that is
+        # itself the sandbox: Codex's Linux seccomp filter kills 32-bit binaries (SIGSYS).
+        sandbox = self.config.get("work_sandbox", "workspace-write") if req.purpose == "work" else "read-only"
         argv = [exe, "exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox,
                 "--output-last-message", str(req.run_dir / "last_message.txt")]
         if req.output_schema:

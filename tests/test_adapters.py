@@ -83,6 +83,16 @@ def test_agy_skip_permissions_opt_in(tmp_path):
     assert "--dangerously-skip-permissions" in review.argv and review.argv[2] == "c"
 
 
+def test_codex_work_sandbox_opt_in(tmp_path):
+    """Real failure on the N100: the pinned i386 ARM gcc dies with SIGSYS under workspace-write."""
+    work = ExecRequest("work", "do it", tmp_path, tmp_path, 60, None)
+    review = ExecRequest("review", "c", tmp_path, tmp_path, 60, None)
+    sandbox = lambda cfg, req: (a := CodexAdapter("x", cfg).prepare(req).argv)[a.index("--sandbox") + 1]
+    assert sandbox({}, work) == "workspace-write" and sandbox({}, review) == "read-only"
+    wide = {"work_sandbox": "danger-full-access"}
+    assert sandbox(wide, work) == "danger-full-access" and sandbox(wide, review) == "read-only"
+
+
 def test_codex_output_schema_is_openai_strict(tmp_path):
     """Real failure on the N100: 'schema.required' must include every key in properties (Missing 'issues')."""
     from agentbridge.adapters.codex import CodexAdapter

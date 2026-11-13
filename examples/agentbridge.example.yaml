@@ -147,6 +147,9 @@ agents:
     model: gpt-6.1-sol
     reasoning_effort: high
     profile: "Codex GPT-6.1-Sol high: main coding worker (owner, 2026-11-13). Shares the codex-reviewer login and quota."
+    # Same trust as antigravity skip_permissions: the host is the sandbox. Codex's own Linux sandbox
+    # kills the pinned i386 ARM toolchain with SIGSYS, so builds could never run.
+    work_sandbox: danger-full-access
     fallback_to: [antigravity-worker]
     max_concurrency: 2
 
