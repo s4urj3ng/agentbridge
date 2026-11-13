@@ -138,6 +138,18 @@ agents:
     max_concurrency: 1
     rolling_limits: [{hours: 5, max: 4}, {hours: 168, max: 25}]
 
+  # --- 2026-11-13 (owner): Codex does the coding work; Claude Personal reviews. Same Codex login as
+  # codex-reviewer, so both share its 5h + weekly quota.
+  - id: codex-worker
+    provider: codex
+    roles: [worker]
+    codex_home: /var/lib/agentbridge/.codex
+    model: gpt-6.1-sol
+    reasoning_effort: high
+    profile: "Codex GPT-6.1-Sol high: main coding worker (owner, 2026-11-13). Shares the codex-reviewer login and quota."
+    fallback_to: [antigravity-worker]
+    max_concurrency: 2
+
   # --- Optional official Gemini CLI (separately authenticated). Unverified until installed.
   - id: gemini-cli-worker
     provider: gemini
