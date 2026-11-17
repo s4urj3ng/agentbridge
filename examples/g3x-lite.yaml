@@ -11,10 +11,9 @@ project:
   repo_path: /srv/agentbridge/repos/g3x-lite      # git clone https://github.com/s4urj3ng/g3x-lite
   remote_url: https://github.com/s4urj3ng/g3x-lite
   base_branch: main
-  # 2026-11-01 (temporary): Claude Team only leads, never reviews, so its quota goes to lead
-  # decisions. Claude Personal is the preferred reviewer; with one slot it stays off the code list
-  # and escalation meanwhile.
-  tech_lead: claude-team-lead
+  # 2026-11-17: the Claude Team account expired and was removed; Claude Personal now leads and
+  # also stays the preferred reviewer.
+  tech_lead: claude-personal-worker   # owner 2026-11-17: claude-team-lead account expired and removed
   default_worker: antigravity-worker          # Gemini 3.8 Flash high; falls back to Argon 4
   workers: [antigravity-argon]
   reviewers: [claude-personal-worker, antigravity-claude-reviewer, antigravity-argon, codex-reviewer]   # first = preferred
