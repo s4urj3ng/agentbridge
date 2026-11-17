@@ -61,7 +61,7 @@ validation:
     candidate_build: ["python3", "-B", "tools/build_candidate_port2a.py"]
     candidate_validate: ["python3", "-B", "tools/validate_candidate_port2a.py"]
   default: [bootstrap, port_tests, audit_tests, hdmi_tests]
-  timeout_s: 900
+  timeout_s: 2400                    # owner 2026-11-17: port_tests alone takes ~926 s on integration branches
 
 policy:
   # boot_manipulation is allowed (boot prototype edits, DISKBOOT candidate builds on the host);
