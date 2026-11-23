@@ -39,13 +39,14 @@ REQUIRED_FLAGS = ("--json", "--sandbox", "--output-schema", "--output-last-messa
 
 def strict_schema(schema: Any) -> Any:
     """OpenAI strict structured output: every object lists ALL its properties in `required` and has
-    additionalProperties false; `default` is not supported. Optional fields (e.g. ReviewResult.issues)
+    additionalProperties false; `default` and `oneOf` are not supported. Optional fields (e.g. ReviewResult.issues)
     otherwise make every `codex exec --output-schema` call fail with invalid_json_schema (HTTP 400)."""
     if isinstance(schema, list):
         return [strict_schema(v) for v in schema]
     if not isinstance(schema, dict):
         return schema
-    out = {k: strict_schema(v) for k, v in schema.items() if k != "default"}
+    # strict mode rejects oneOf; anyOf is allowed and the decision variants are disjoint by their `type` const
+    out = {("anyOf" if k == "oneOf" else k): strict_schema(v) for k, v in schema.items() if k != "default"}
     if isinstance(out.get("properties"), dict):
         out["required"] = list(out["properties"])
         out["additionalProperties"] = False

@@ -155,3 +155,26 @@ def test_env_file_loading(monkeypatch, tmp_path):
     assert sorted(load_env_file(f)) == ["FOO_TOKEN", "MINDLOGIC_API_KEY"]
     import os
     assert os.environ["MINDLOGIC_API_KEY"] == "abc123xyz" and os.environ["EXISTING"] == "old"
+
+
+def test_codex_strict_schema_accepts_tech_lead_envelope():
+    """codex exec --output-schema runs in strict mode, which rejects oneOf (the Tech Lead envelope's
+    decision union) and default; it must be sent as anyOf with every property required."""
+    import json
+    from agentbridge.adapters.codex import strict_schema
+    from agentbridge.orchestrator.decisions import envelope_json_schema
+    s = strict_schema(envelope_json_schema())
+    text = json.dumps(s)
+    assert '"oneOf"' not in text and '"default"' not in text
+    assert "anyOf" in json.dumps(s["properties"]["decisions"]["items"])
+
+    def check(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("properties"), dict):
+                assert set(node["required"]) == set(node["properties"]) and node["additionalProperties"] is False
+            for v in node.values():
+                check(v)
+        elif isinstance(node, list):
+            for v in node:
+                check(v)
+    check(s)
